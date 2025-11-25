@@ -1,28 +1,33 @@
 #include "voice.h"
 
 bool Voice::allocateBuffers() {
-  // heap_caps_print_heap_info(MALLOC_CAP_8BIT);
-  _buffer0 = (uint8_t*)heap_caps_malloc( BUF_SIZE_BYTES + BUF_EXTRA_BYTES , MALLOC_CAP_INTERNAL);
-  _buffer1 = (uint8_t*)heap_caps_malloc( BUF_SIZE_BYTES + BUF_EXTRA_BYTES , MALLOC_CAP_INTERNAL);
+  // MALLOC_CAP_INTERNAL
+  // MALLOC_CAP_SPIRAM
+  uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  size_t ram =  heap_caps_get_free_size(caps);
+  ESP_LOGI("","VOICE: allocateBuffers: Free RAM: %d \r\n", ram);
+  // heap_caps_print_heap_info(caps);
+  _buffer0 = (uint8_t*)heap_caps_aligned_alloc( BYTE_ALIGN BUF_SIZE_BYTES + BUF_EXTRA_BYTES , caps);
+  _buffer1 = (uint8_t*)heap_caps_aligned_alloc( BYTE_ALIGN BUF_SIZE_BYTES + BUF_EXTRA_BYTES , caps);
+
   if( _buffer0 == NULL || _buffer1 == NULL){
-    DEBUG("No more RAM for sampler buffer!");
+    ESP_LOGI("","No more RAM for sampler buffer!");
     return false;
   } else {
-    DEBF("%d Bytes RAM allocated for sampler buffers, &_buffer0=%#010x\r\n", BUF_NUMBER * ( BUF_SIZE_BYTES + BUF_EXTRA_BYTES ) , _buffer0);
+    ESP_LOGI("","%d Bytes RAM allocated for sampler buffers, &_buffer0=%#010x\r\n", BUF_NUMBER * ( BUF_SIZE_BYTES + BUF_EXTRA_BYTES ) , _buffer0);
   }
   return true;
 }
 
 
-void Voice::init(SDMMC_FAT32* Card, bool* sustain, bool* normalized){
+bool Voice::init(SDMMC_FAT32* Card, uint32_t* sustain, uint32_t* normalized){
   _Card = Card;
   _sustain = sustain;
   _normalized = normalized;
   _speedModifier = 1.0f;
   if (!allocateBuffers()) {
-    DEBUG("VOICE: INIT: NOT ENOUGH MEMORY");
-    delay(100);
-    while(1){;}
+    ESP_LOGI("","VOICE: INIT: NOT ENOUGH MEMORY");
+    return false;
   }
   AmpEnv.init(SAMPLE_RATE);
   AmpEnv.end(Adsr::END_NOW);
@@ -30,6 +35,7 @@ void Voice::init(SDMMC_FAT32* Card, bool* sustain, bool* normalized){
   _midiNote = 255;
   _pressed  = false;
   _eof      = true;
+  return true;
 }
 
 
@@ -44,7 +50,8 @@ void Voice::start(const sample_t smpFile, uint8_t midiNote, uint8_t midiVelo) { 
     _coarseBytesPlayed      = 0;
     _fullSampleBytes        = smpFile.channels * smpFile.bit_depth / 8;
     _speed                  = smpFile.speed * _speedModifier;
-    _bufSizeBytes           = BUF_SIZE_BYTES;
+    _read_buf_sectors       = READ_BUF_SECTORS;
+    _bufSizeBytes           = _read_buf_sectors * BYTES_PER_SECTOR;
     _bufSizeSmp             = _bufSizeBytes / _fullSampleBytes;
     _bufEmpty[0]            = true;
     _bufEmpty[1]            = true;
@@ -57,6 +64,10 @@ void Voice::start(const sample_t smpFile, uint8_t midiNote, uint8_t midiVelo) { 
     _idToFill               = 0;
     _idToPlay               = 1;
     _curChain               = 0;
+    _pL1                    = start_byte[_fullSampleBytes / smpFile.channels];
+    _pL2                    = _pL1 + _fullSampleBytes;
+    _pR1                    = _pL1 + ( _fullSampleBytes / smpFile.channels );
+    _pR2                    = _pR1 + _fullSampleBytes;
     _loop                   = (smpFile.loop_mode > 0);
     if (_loop) {
       if (_sampleFile.loop_first_smp >=0 ) {
@@ -73,10 +84,6 @@ void Voice::start(const sample_t smpFile, uint8_t midiNote, uint8_t midiVelo) { 
       _loopLastSector  = (smpFile.byte_offset + _fullSampleBytes * _loopLastSmp ) / BYTES_PER_SECTOR;
       
     }
-    _pL1                    = start_byte[_fullSampleBytes / smpFile.channels];
-    _pL2                    = _pL1 + _fullSampleBytes;
-    _pR1                    = _pL1 + ( _fullSampleBytes / smpFile.channels );
-    _pR2                    = _pR1 + _fullSampleBytes;
     if (_sampleFile.size == 0) {
       _divFileSize          = 0.001f;
     } else {
@@ -100,7 +107,7 @@ void Voice::start(const sample_t smpFile, uint8_t midiNote, uint8_t midiVelo) { 
     
 //    _killScoreCoef =  (float)_divFileSize;
     _hungerCoef = (float)_fullSampleBytes * (float)_speed;
- //    DEBF("VOICE %d: START note %d velo %d offset %d\r\n", my_id, midiNote, midiVelo, smpFile.byte_offset);
+ //    ESP_LOGI("","VOICE %d: START note %d velo %d offset %d\r\n", my_id, midiNote, midiVelo, smpFile.byte_offset);
     AmpEnv.retrigger(Adsr::END_NOW);
     _active = true;
     _dying = false;
@@ -112,7 +119,7 @@ void Voice::end(Adsr::eEnd_t end_type){ // most likely being executed in Control
   switch ((int)end_type) {
     case Adsr::END_NOW:{
       AmpEnv.end(Adsr::END_NOW);
- //     DEBF("VOICE %d: END: NOW midi note %d\r\n", my_id, _midiNote); 
+ //     ESP_LOGI("","VOICE %d: END: NOW midi note %d\r\n", my_id, _midiNote); 
       _active = false;
       _midiNote = 255;
       _amplitude = 0.0;
@@ -121,13 +128,13 @@ void Voice::end(Adsr::eEnd_t end_type){ // most likely being executed in Control
     case Adsr::END_FAST:{
       _dying = true;
       AmpEnv.end(Adsr::END_FAST);
- //     DEBF("VOICE %d: END: FAST %d\r\n", my_id, _midiNote);
+ //     ESP_LOGI("","VOICE %d: END: FAST %d\r\n", my_id, _midiNote);
       break;
     }
     case Adsr::END_REGULAR:
     default:{
       if (!_pressed && !(*_sustain)) {
-//        DEBF("VOICE %d: END: REGULAR %d\r\n", my_id, _midiNote); 
+//        ESP_LOGI("","VOICE %d: END: REGULAR %d\r\n", my_id, _midiNote); 
         AmpEnv.end(Adsr::END_REGULAR);
       }
     }
@@ -135,9 +142,9 @@ void Voice::end(Adsr::eEnd_t end_type){ // most likely being executed in Control
 }
 
 void Voice::getSample(float& sampleL, float& sampleR) {
-  float env;
-  int bufPosBytes;
-  float l1, l2, r1, r2;
+  float WORD_ALIGNED_ATTR env;
+  int WORD_ALIGNED_ATTR bufPosBytes;
+  float WORD_ALIGNED_ATTR l1, l2, r1, r2;
   sampleL = 0.0f; 
   sampleR = 0.0f;
   if (!_active ) return;
@@ -151,12 +158,12 @@ void Voice::getSample(float& sampleL, float& sampleR) {
       _dying = false;
       _midiNote = 255;
       _amplitude = 0.0f;
-      //  DEBF("Voice::getSample: note %d active=false\r\n", _midiNote);
+      //  ESP_LOGI("","Voice::getSample: note %d active=false\r\n", _midiNote);
       return;
     } else {
       bufPosBytes = (int)_playBufOffset + (int)_fullSampleBytes * (int)_bufPosSmp[_idToPlay ];  // pos in a byte buffer
 
-      //DEBF("pos %d \t posF %f\r\n", _bufPosSmp[_idToPlay ], _bufPosSmpF);
+      //ESP_LOGI("","pos %d \t posF %f\r\n", _bufPosSmp[_idToPlay ], _bufPosSmpF);
       l1 = *( reinterpret_cast<volatile int16_t*>( &_playBuffer[ bufPosBytes + _pL1 ] ) );
       l2 = *( reinterpret_cast<volatile int16_t*>( &_playBuffer[ bufPosBytes + _pL2 ] ) );
       sampleL = (float)interpolate( l1, l2, _bufPosSmpF ) * (float)env;
@@ -181,7 +188,7 @@ void Voice::getSample(float& sampleL, float& sampleR) {
    */   
       if ( _bytesPlayed >= _bytesToPlay ) {
         end(Adsr::END_NOW);
-        // DEBF("VOICE %d: DATA END: bytes played = %d , bytes to play = %d , pos in buffer = %d \r\n", my_id, _bytesPlayed , _bytesToPlay, _bufPosSmp[_idToPlay]);
+        // ESP_LOGI("","VOICE %d: DATA END: bytes played = %d , bytes to play = %d , pos in buffer = %d \r\n", my_id, _bytesPlayed , _bytesToPlay, _bufPosSmp[_idToPlay]);
       } else { 
         if (_bufPosSmp[_idToPlay ]  > _samplesInPlayBuf ) {
           if (_started) toggleBuf();
@@ -193,7 +200,7 @@ void Voice::getSample(float& sampleL, float& sampleR) {
 
 void  Voice::feed() { // executed in Control Task (Core1)
   if (_bufEmpty[_idToFill] && !_eof) {
-    
+    /*
     if (_loop) {
       int bytes_till_loop_end = _loopLastSmp * _fullSampleBytes - _bytesPlayed;
       float fill_coef =  (float)bytes_till_loop_end * (float)DIV_BUF_SIZE_BYTES ;
@@ -203,18 +210,18 @@ void  Voice::feed() { // executed in Control Task (Core1)
         
       } 
     }
-
-    int sectorsToRead = READ_BUF_SECTORS;
+    */
+    int sectorsToRead = _read_buf_sectors;
     int sectorsAvailable;
     volatile uint8_t* bufAddr =  _fillBuffer;
     volatile uint32_t lastSec, firstSec;
     firstSec = lastSec = _lastSectorRead;
-    // DEBF("VOICE %d: FEED: lastSec before %d", my_id,  lastSec);
-    // DEBF("fill buf addr %d\r\n", bufAddr);
+    // ESP_LOGI("","VOICE %d: FEED: lastSec before %d", my_id,  lastSec);
+    // ESP_LOGI("","fill buf addr %d\r\n", bufAddr);
     while (sectorsToRead > 0) {
       sectorsAvailable = min(_sampleFile.sectors[_curChain].last - lastSec, (uint32_t) sectorsToRead) ;
       if (sectorsAvailable > 0) { // we have some sectors in the current chain to read
-        // DEBF("block available = %d Pointer = %010x\r\n", sectorsAvailable, bufAddr);
+        // ESP_LOGI("","block available = %d Pointer = %010x\r\n", sectorsAvailable, bufAddr);
         _Card->read_block((uint8_t*)bufAddr, lastSec+1, sectorsAvailable);
         lastSec += sectorsAvailable;
         _bufEmpty[_idToFill]    = false; // bufToFill is now filled with the first sectors of sample file
@@ -232,7 +239,8 @@ void  Voice::feed() { // executed in Control Task (Core1)
       }
     }
     // _lastSectorRead could have changed while we were reading here
-    if (firstSec == _lastSectorRead) {
+    //never happened in real life
+    //if (firstSec == _lastSectorRead) {
       _lastSectorRead = lastSec;
       // copy first bytes of fillBuffer to playBuffer's extra zone for speeding up interpolation on bufToggle
       memcpy((void*)(_playBuffer + _bufSizeBytes), (const void*)(_fillBuffer ), BUF_EXTRA_BYTES);
@@ -246,18 +254,18 @@ void  Voice::feed() { // executed in Control Task (Core1)
         _bufPosSmpF             = _bufPosSmp[_idToPlay];
         _playBufOffset          = _sampleFile.byte_offset ;
         _samplesInPlayBuf       = (_bufSizeBytes - _playBufOffset) / _fullSampleBytes ;
-     //   DEBF("VOICE %d: FEED-0: pos: %d, inBuf: %d, offset: %d, BPlyd: %d, firstSec %d, lastSec %d \r\n", my_id, _bufPosSmp[_idToPlay ], _samplesInPlayBuf, _playBufOffset, _bytesPlayed, firstSec, _lastSectorRead );
+        //ESP_LOGI("","VOICE %d: FEED-0: pos: %d, inBuf: %d, offset: %d, BPlyd: %d, firstSec %d, lastSec %d \r\n", my_id, _bufPosSmp[_idToPlay ], _samplesInPlayBuf, _playBufOffset, _bytesPlayed, firstSec, _lastSectorRead );
         _started = true;
       } else {
         _bufPosSmp[_idToFill]   = 0;
         // _fillBufOffset = ( _fullSampleBytes - ( (BUF_SIZE_BYTES - _playBufOffset) % _fullSampleBytes )) % _fullSampleBytes ;
         // _samplesInFillBuf = ((int)BUF_SIZE_BYTES - (int)_fillBufOffset ) / (int)_fullSampleBytes ;
-      //  DEBF("VOICE %d: FEED: pos: %d, inBuf: %d, offset: %d, BPlyd: %d, firstSec %d, lastSec %d \r\n", my_id, _bufPosSmp[_idToPlay ], _samplesInPlayBuf, _playBufOffset, _bytesPlayed, firstSec, _lastSectorRead );
+        //ESP_LOGI("","VOICE %d: FEED: pos: %d, inBuf: %d, offset: %d, BPlyd: %d, firstSec %d, lastSec %d \r\n", my_id, _bufPosSmp[_idToPlay ], _samplesInPlayBuf, _playBufOffset, _bytesPlayed, firstSec, _lastSectorRead );
      
       }
-    } else {
-      DEBUG ("HERE IT IS!!! ");
-    }
+    //} else {
+    //  ESP_LOGI("","HERE IT IS!!! ");
+    //}
   }
 }
 
@@ -277,7 +285,7 @@ inline void Voice::toggleBuf(){  // Core0
   _bytesPlayed = (int)filePosBytes - (int)_sampleFile.byte_offset ;
   _playBufOffset = (int)filePosBytes - (int)_coarseBytesPlayed;
   _samplesInPlayBuf = ( (int)_bufSizeBytes -  (int)_playBufOffset ) /  (int)_fullSampleBytes ;
- // DEBF("VOICE %d: TOGGLE: pos: %d, inBuf: %d, off: %d, BPlyd: %d, ampl %f lastSec %d \r\n", my_id, _bufPosSmp[_idToPlay ], _samplesInPlayBuf, _playBufOffset, _bytesPlayed, _amplitude, _lastSectorRead );
+ // ESP_LOGI("","VOICE %d: TOGGLE: pos: %d, inBuf: %d, off: %d, BPlyd: %d, ampl %f lastSec %d \r\n", my_id, _bufPosSmp[_idToPlay ], _samplesInPlayBuf, _playBufOffset, _bytesPlayed, _amplitude, _lastSectorRead );
   switch(_idToPlay ) { 
     case 0:
       _playBuffer  = _buffer1;
@@ -292,7 +300,7 @@ inline void Voice::toggleBuf(){  // Core0
       _idToFill  = 1;
   }
   _bufEmpty[_idToFill ] = true;
-  //  DEBF("&playBuf=%#010x &fillBuf=%#010x\r\n", _buffer0, _fillBuffer);
+  //  ESP_LOGI("","&playBuf=%#010x &fillBuf=%#010x\r\n", _buffer0, _fillBuffer);
 }
 
 

@@ -33,8 +33,8 @@
 
 
 #ifdef RGB_LED
-#include "FastLED.h"
-CRGB leds[1];
+  #include "FastLED.h"
+  CRGB leds[1];
 #endif
 
 //SET_LOOP_TASK_STACK_SIZE(READ_BUF_SECTORS * BYTES_PER_SECTOR + 20000);
@@ -81,11 +81,11 @@ TaskHandle_t SynthTask;
 TaskHandle_t ControlTask;
 static volatile int DRAM_ATTR WORD_ALIGNED_ATTR out_buf_id = 0;
 static volatile int DRAM_ATTR WORD_ALIGNED_ATTR gen_buf_id = 1;
-static float DRAM_ATTR WORD_ALIGNED_ATTR sampler_l[2][DMA_BUF_LEN];     // sampler L buffer
-static float DRAM_ATTR WORD_ALIGNED_ATTR sampler_r[2][DMA_BUF_LEN];     // sampler R buffer
-static float DRAM_ATTR WORD_ALIGNED_ATTR mix_buf_l[2][DMA_BUF_LEN];     // mix L channel
-static float DRAM_ATTR WORD_ALIGNED_ATTR mix_buf_r[2][DMA_BUF_LEN];     // mix R channel
-static int16_t DRAM_ATTR WORD_ALIGNED_ATTR out_buf[2][DMA_BUF_LEN * 2];        // i2s L+R output buffer
+static float DRAM_ATTR WORD_ALIGNED_ATTR sampler_l[DMA_BUF_LEN];     // sampler L buffer
+static float DRAM_ATTR WORD_ALIGNED_ATTR sampler_r[DMA_BUF_LEN];     // sampler R buffer
+static float DRAM_ATTR WORD_ALIGNED_ATTR mix_buf_l[DMA_BUF_LEN];     // mix L channel
+static float DRAM_ATTR WORD_ALIGNED_ATTR mix_buf_r[DMA_BUF_LEN];     // mix R channel
+static int16_t DRAM_ATTR WORD_ALIGNED_ATTR out_buf[DMA_BUF_LEN * 2];        // i2s L+R output buffer
 
 
 // =============================================================== forward declarations ===============================================================
@@ -95,11 +95,9 @@ static  void IRAM_ATTR sampler_generate_buf();
 
 // =============================================================== PER CORE TASKS ===============================================================
 static void IRAM_ATTR audio_task(void *userData) { // core 0 task
-  DEBUG ("core 0 audio task run");
-  vTaskDelay(20);
+  ESP_LOGI("","core 0 audio task run");
+  vTaskDelay(110);
   volatile uint32_t WORD_ALIGNED_ATTR t1,t2,t3,t4;
-  out_buf_id = 0;
-  gen_buf_id = 1;
   
   while (true) {
 #ifdef DEBUG_CORE_TIME 
@@ -122,44 +120,16 @@ static void IRAM_ATTR audio_task(void *userData) { // core 0 task
     
 #ifdef DEBUG_CORE_TIME 
     t4=micros();
-    DEBF("gen=%d, mix=%d, output=%d, total=%d\r\n", t2-t1, t3-t2, t4-t3, t4-t1);
+    ESP_LOGI("","gen=%d, mix=%d, output=%d, total=%d\r\n", t2-t1, t3-t2, t4-t3, t4-t1);
 #endif
 
-    out_buf_id = 1;
-    gen_buf_id = 0;
-    
-#ifdef DEBUG_CORE_TIME 
-    t1=micros();
-#endif
-
-    sampler_generate_buf();
-    
-#ifdef DEBUG_CORE_TIME 
-    t2=micros();
-#endif
-
-    mixer(); 
-    
-#ifdef DEBUG_CORE_TIME 
-    t3=micros();
-#endif
-
-    i2s_output();
-    
-#ifdef DEBUG_CORE_TIME 
-    t4=micros();
-    DEBF("gen=%d, mix=%d, output=%d, total=%d\r\n", t2-t1, t3-t2, t4-t3, t4-t1);
-#endif
-
-    out_buf_id = 0;
-    gen_buf_id = 1;
   }
 }
  
 static void  IRAM_ATTR control_task(void *userData) { // core 1 task
   byte hue=0;
-  DEBUG ("core 1 control task run");
-  vTaskDelay(20);
+  ESP_LOGI("","core 1 control task run");
+  vTaskDelay(110);
   uint32_t WORD_ALIGNED_ATTR passby = 0;
 
   while (true) { 
@@ -193,9 +163,9 @@ static void  IRAM_ATTR control_task(void *userData) { // core 1 task
       FastLED.show(1);
       #endif
       
-    //  DEBF("Active voices %d of %d \r\n", Sampler.getActiveVoices(), MAX_POLYPHONY);
-    //  DEBF("ControlTask unused stack size = %d bytes\r\n", uxTaskGetStackHighWaterMark(ControlTask));
-    //  DEBF("SynthTask unused stack size = %d bytes\r\n", uxTaskGetStackHighWaterMark(SynthTask));
+    //  ESP_LOGI("","Active voices %d of %d \r\n", Sampler.getActiveVoices(), MAX_POLYPHONY);
+    //  ESP_LOGI("","ControlTask unused stack size = %d bytes\r\n", uxTaskGetStackHighWaterMark(ControlTask));
+    //  ESP_LOGI("","SynthTask unused stack size = %d bytes\r\n", uxTaskGetStackHighWaterMark(SynthTask));
     }
   }
 }
@@ -210,37 +180,40 @@ void setup() {
 #ifdef RGB_LED
   FastLED.addLeds<WS2812, RGB_LED, RGB>(leds, 1);
   FastLED.setBrightness(1);
-#endif
-
-#ifdef RGB_LED
   leds[0].setHue(HUE_RED); //green
   FastLED.show(1);
 #endif
 
-delay(2000);
+ESP_LOGI("","MIDI: INIT");
+  MidiInit();
+
+delay(800);
 
 #ifdef RGB_LED
   leds[0].setHue(HUE_PURPLE); //green
   FastLED.show(1);
 #endif
 
-DEBUG("I2S: INIT");
+ESP_LOGI("","I2S: INIT");
   i2sInit();
 
-DEBUG("MIDI: INIT");
-  MidiInit();
-
-DEBUG("CARD: BEGIN");
+ESP_LOGI("","CARD: BEGIN");
   Card.begin();
   
 //delay(1000);
  // Card.testReadSpeed(READ_BUF_SECTORS,8);
   
-DEBUG("REVERB: INIT");
+ESP_LOGI("","REVERB: INIT");
   Reverb.Init();
  
   
-DEBUG("SAMPLER: INIT");
+  Reverb.SetLevel(0.5f);
+  Reverb.SetTime(0.7f);
+  Sampler.setReverbSendLevel(0.5f);
+
+
+//heap_caps_print_heap_info(MALLOC_CAP_8BIT || MALLOC_CAP_INTERNAL);
+ESP_LOGI("","SAMPLER: INIT");
   Sampler.init(&Card);
   
   Sampler.setCurrentFolder(1);
@@ -248,18 +221,15 @@ DEBUG("SAMPLER: INIT");
   
   initButtons();
   
-  xTaskCreatePinnedToCore( audio_task, "SynthTask", 4000, NULL, 20, &SynthTask, 0 );
+  xTaskCreatePinnedToCore( audio_task, "SynthTask", 4000, NULL, 24, &SynthTask, 0 );
  
-  xTaskCreatePinnedToCore( control_task, "ControlTask", 9000, NULL, 3, &ControlTask, 1 );
+  xTaskCreatePinnedToCore( control_task, "ControlTask", 9000, NULL, 23, &ControlTask, 1 );
 
-  Reverb.SetLevel(0.5f);
-  Reverb.SetTime(0.7f);
-  Sampler.setReverbSendLevel(0.5f);
   
   c_major();
 
-  DEBUG ("Setup() DONE");
- // heap_caps_print_heap_info(MALLOC_CAP_8BIT);
+  ESP_LOGI("","Setup() DONE");
+ // heap_caps_print_heap_info(MALLOC_CAP_8BIT );
  
 #ifdef RGB_LED
   leds[0].setHue(HUE_GREEN); //green
@@ -269,6 +239,13 @@ DEBUG("SAMPLER: INIT");
 
 
 void loop() {
+  char res[800];
+  vTaskList(res) ;
+  ESP_LOGI("", "%s\n\n", res);
+  heap_caps_print_heap_info( MALLOC_CAP_INTERNAL );
+
+  ESP_LOGI("","LOOP: killing task");
+  taskYIELD();
 
 
   vTaskDelete(NULL);

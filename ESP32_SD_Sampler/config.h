@@ -1,7 +1,7 @@
 #pragma once
 
 //******************************************************* DEBUG **********************************************
-// #define DEBUG_ON
+
 //#define DEBUG_CORE_TIME
 //#define C_MAJOR_ON_START                // play C major chord on startup (testing) and on folder change
 
@@ -10,19 +10,19 @@
 #define SAMPLE_RATE           44100       // audio output sampling rate
 
 //#define MIDI_VIA_SERIAL                   // use this option to enable Hairless MIDI on Serial port @115200 baud (USB connector), THIS WILL BLOCK SERIAL DEBUGGING
- #define MIDI_VIA_SERIAL2                  // use this option if you want to operate by standard MIDI @31250baud, UART2 (Serial2), 
-// #define MIDI_USB_DEVICE                     // use this option if you want to operate via USB with the sampler seen as a MIDI device (-50 kBytes of available RAM)
+#define MIDI_VIA_SERIAL2                  // use this option if you want to operate by standard MIDI @31250baud, UART2 (Serial2), 
+//#define MIDI_USB_DEVICE                     // use this option if you want to operate via USB with the sampler seen as a MIDI device (consumes RAM)
 
-#define RECEIVE_MIDI_CHAN     1
+#define RECEIVE_MIDI_CHAN     0
 
 //******************************************************* FILESYSTEM **********************************************
 #define INI_FILE              "sampler.ini"
 #define ROOT_FOLDER           "/"         // only </> is supported yet
-#define READ_BUF_SECTORS      7           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
+#define READ_BUF_SECTORS      5           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
 
 
 //******************************************************* SAMPLER **********************************************
-#define MAX_POLYPHONY         17          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 156
+#define MAX_POLYPHONY         15          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 156
 #define SACRIFY_VOICES        1           // voices used for smooth transisions to avoid clicks
 #define MAX_SAME_NOTES        2           // number of voices allowed playing the same note
 #define MAX_VELOCITY_LAYERS   16
@@ -34,7 +34,7 @@
 //******************************************************* PINS **********************************************
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 // ESP32 S3
-// #define RGB_LED         38      // RGB LED as a vital sign
+ // #define RGB_LED         38      // RGB LED as a vital sign
   #define MIDIRX_PIN      4       // this pin is used for input when MIDI_VIA_SERIAL2 defined (note that default pin 17 won't work with PSRAM)
   #define MIDITX_PIN      9       // this pin will be used for output (not implemented yet) when MIDI_VIA_SERIAL2 defined
   #define I2S_BCLK_PIN    5       // I2S BIT CLOCK pin (BCL BCK CLK)
@@ -74,9 +74,19 @@
   #define SDMMC_CMD 11  // LOLIN PCB hardlink
   #define SDMMC_CLK 12  // PCB hardlink
   #define SDMMC_D0  13  // PCB hardlink
-  #define SDMMC_D1  18   // my choice // was 8 before
+  #define SDMMC_D1  18   // my choice //was 8 before
   #define SDMMC_D2  10  // my choice
   #define SDMMC_D3  46  // PCB hardlink
+
+/*
+// ESP32S3 allows almost any GPIOs for any particular needs
+#define SDMMC_CMD 38
+#define SDMMC_CLK 39
+#define SDMMC_D0  10
+#define SDMMC_D1  11
+#define SDMMC_D2  12
+#define SDMMC_D3  13
+*/
 
 #elif defined(CONFIG_IDF_TARGET_ESP32)
 // ESP32

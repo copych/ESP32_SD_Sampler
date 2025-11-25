@@ -18,7 +18,7 @@ void Adsr::init(float sample_rate, int blockSize) {
     setTime(ADSR_SEG_ATTACK, 0.0f);
     setTime(ADSR_SEG_DECAY, 0.0f);
     setTime(ADSR_SEG_RELEASE, 0.05f);
-    setTime(ADSR_SEG_FAST_RELEASE, 0.0002f); // a few samples fade, trying to avoid clicks on polyphony overrun
+    setTime(ADSR_SEG_FAST_RELEASE, 0.0005f); // a few samples fade, trying to avoid clicks on polyphony overrun
     setTime(ADSR_SEG_SEMI_FAST_RELEASE, 0.02f); // for exclusive note groups voice stealing
 }
 

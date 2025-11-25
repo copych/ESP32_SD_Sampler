@@ -26,6 +26,7 @@ esp_err_t SDMMC_FAT32::read_block(void *dst, uint32_t start_sector, uint32_t sec
 	xSemaphoreGive(mutex);
   #endif
   return(ret);
+
 }
 
 esp_err_t SDMMC_FAT32::read_sector( uint32_t sector )
@@ -84,10 +85,10 @@ void SDMMC_FAT32::testReadSpeed(uint32_t sectorsPerRead, uint32_t totalMB){
   }
   ms2 = micros(); 
   float MBytesPerS = (float)totalMB * 1000.0 * 1000.0 / (float)(ms2-ms1);
-  DEBF("Reading %d MBytes\r\n", totalMB);
-  DEBF("Reading block size: %d Bytes\r\n", sectorsPerRead * BYTES_PER_SECTOR);
-  DEBF("Time spent: %d ms\r\n" , (ms2-ms1)/1000);
-  DEBF("Read speed: %3.2f MB/s\r\n\r\n" , MBytesPerS);
+  ESP_LOGI("","Reading %d MBytes\r\n", totalMB);
+  ESP_LOGI("","Reading block size: %d Bytes\r\n", sectorsPerRead * BYTES_PER_SECTOR);
+  ESP_LOGI("","Time spent: %d ms\r\n" , (ms2-ms1)/1000);
+  ESP_LOGI("","Read speed: %3.2f MB/s\r\n\r\n" , MBytesPerS);
 }
     
 void SDMMC_FAT32::begin(void)
@@ -129,20 +130,20 @@ void SDMMC_FAT32::begin(void)
    
   slot_config.width = 4;
   ret = sdmmc_host_init();
-  if(ret != ESP_OK) {    DEBF( "sdmmc_host_init : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_host_init : %s\r\n", esp_err_to_name(ret));  }
   ret = sdmmc_host_set_bus_ddr_mode(SDMMC_HOST_SLOT_1, false);
-  if(ret != ESP_OK) {    DEBF( "sdmmc_host_set_bus_ddr_mode : %s\r\n", esp_err_to_name(ret));   }
+  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_host_set_bus_ddr_mode : %s\r\n", esp_err_to_name(ret));   }
   ret = sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config);
-  if(ret != ESP_OK) {    DEBF( "sdmmc_host_init_slot : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_host_init_slot : %s\r\n", esp_err_to_name(ret));  }
   ret = sdmmc_card_init(&host, &card);  
-  if(ret != ESP_OK) {    DEBF( "sdmmc_card_init : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_card_init : %s\r\n", esp_err_to_name(ret));  }
   sdmmc_card_print_info(stdout, &card);
   uint32_t width = sdmmc_host_get_slot_width(SDMMC_HOST_SLOT_1);
-  DEBF( "Bus width: %d\r\n", width);
+  ESP_LOGI("", "Bus width: %d\r\n", width);
   ret = get_mbr();
-  if(ret != ESP_OK) {    DEBF( "get_mbr : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "get_mbr : %s\r\n", esp_err_to_name(ret));  }
   ret = get_bpb();
-  if(ret != ESP_OK) {    DEBF( "get_bpb : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "get_bpb : %s\r\n", esp_err_to_name(ret));  }
 
 
 /*
@@ -163,7 +164,7 @@ void SDMMC_FAT32::begin(void)
 void SDMMC_FAT32::end() {
   ret = sdmmc_host_deinit() ;
   if(ret != ESP_OK){
-    DEBF( "sdmmc_host_deinit : %s\r\n", esp_err_to_name(ret));
+    ESP_LOGI("", "sdmmc_host_deinit : %s\r\n", esp_err_to_name(ret));
   }
 }
 
@@ -173,14 +174,14 @@ esp_err_t SDMMC_FAT32::get_mbr() {
     for (int i = 0; i < 4; i++) {
       if (mbrStruct.partitionData[i].fsType == 11  ||  mbrStruct.partitionData[i].fsType == 12) { 
         _firstSector  = mbrStruct.partitionData[i].firstSector;
-        DEBF("_firstSector %d\r\n", _firstSector);
+        ESP_LOGI("","_firstSector %d\r\n", _firstSector);
         _fsType       = mbrStruct.partitionData[i].fsType;
-        DEBF("_fsType %d\r\n", _fsType);
+        ESP_LOGI("","_fsType %d\r\n", _fsType);
         _partitionId = i ;        
         _sectorsTotal  = mbrStruct.partitionData[i].sectorsTotal;
-        DEBF("_sectorsTotal %d\r\n", _sectorsTotal);
-        DEBF("Partition size = %d MB\r\n" , _sectorsTotal / 1024 / 1024 * BYTES_PER_SECTOR );
-        DEBUG(">>>Reading MBR done");
+        ESP_LOGI("","_sectorsTotal %d\r\n", _sectorsTotal);
+        ESP_LOGI("","Partition size = %d MB\r\n" , _sectorsTotal / 1024 / 1024 * BYTES_PER_SECTOR );
+        ESP_LOGI("",">>>Reading MBR done");
         ret = ESP_OK;
         break;
       } else {
@@ -195,22 +196,28 @@ esp_err_t SDMMC_FAT32::get_bpb() {
   ret = read_block(&bpbStruct, mbrStruct.partitionData[0].firstSector, 1);
   if (ret == ESP_OK) {
     _sectorsPerFat      = bpbStruct.sectorsPerFat;
-    DEBF("_sectorsPerFat %d\r\n", _sectorsPerFat);
+    ESP_LOGI("","_sectorsPerFat %d\r\n", _sectorsPerFat);
     _bytesPerSector     = bpbStruct.bytesPerSector;
-    DEBF("_bytesPerSector %d\r\n", _bytesPerSector);
+    ESP_LOGI("","_bytesPerSector %d\r\n", _bytesPerSector);
     _numFats            = bpbStruct.numberofFATs;
-    DEBF("_numFats %d\r\n", _numFats);
+    ESP_LOGI("","_numFats %d\r\n", _numFats);
     _reservedSectors    = bpbStruct.reservedSectorCount;
-    DEBF("_reservedSectors %d\r\n", _reservedSectors);    
+    ESP_LOGI("","_reservedSectors %d\r\n", _reservedSectors);    
     _rootCluster    = bpbStruct.rootCluster;
-    DEBF("_rootCluster %d\r\n", _rootCluster);
+    ESP_LOGI("","_rootCluster %d\r\n", _rootCluster);
     _firstDataSector    = _sectorsPerFat * _numFats + _reservedSectors ;
-    DEBF("_firstDataSector %d\r\n", _firstDataSector);
+    ESP_LOGI("","_firstDataSector %d\r\n", _firstDataSector);
     _sectorsPerCluster  = bpbStruct.sectorPerCluster;
-    DEBF("_sectorsPerCluster %d\r\n", _sectorsPerCluster);
+    ESP_LOGI("","_sectorsPerCluster %d\r\n", _sectorsPerCluster);
     _bytesPerCluster  = _sectorsPerCluster * _bytesPerSector ;
-    DEBF("_bytesPerCluster %d\r\n", _bytesPerCluster);
-    DEBUG(">>>Reading BPB done.");
+    ESP_LOGI("","_bytesPerCluster %d\r\n", _bytesPerCluster);
+    ESP_LOGI("",">>>Reading BPB done.");
+  } else {
+    ESP_LOGI("","SDMMC: ERROR reading partition data");
+    _sectorsPerFat      = 1;
+    _sectorsPerCluster = 1;
+    _bytesPerCluster = 1;
+    _bytesPerSector = 512;
   }
   return ret;
 }
@@ -218,7 +225,7 @@ esp_err_t SDMMC_FAT32::get_bpb() {
 uint32_t SDMMC_FAT32::getNextSector(uint32_t curSector) {
   if (curSector == 0) {
     curSector = _sectorInBuf;
-    DEBUG("curSector = 0");
+    ESP_LOGI("","curSector = 0");
   }
   uint32_t curCluster = clusterBySector(curSector);
   uint32_t nextSector = curSector + 1;
@@ -251,13 +258,13 @@ entry_t* SDMMC_FAT32::findEntry(const fpath_t& search_path) {
   name = search_path;
   name.toUpperCase();
   name.replace("\\",""); 
-  DEBF("Searching in <%s> for [%s] entry:\r\n", _currentDir.c_str(), search_path.c_str());
+  ESP_LOGI("","Searching in <%s> for [%s] entry:\r\n", _currentDir.c_str(), search_path.c_str());
   rewindDir();
   entry = nextEntry();
   while (!entry->is_end) {
     testname = entry->name;
     testname.toUpperCase();
-    //DEBF("compare <%s> <%s>\r\n", name.c_str(), testname.c_str());
+    //ESP_LOGI("","compare <%s> <%s>\r\n", name.c_str(), testname.c_str());
     if (testname == name) {
       return entry;
       break;
@@ -278,13 +285,13 @@ uint32_t SDMMC_FAT32::findEntryCluster(const fpath_t& search_path) {
   name = search_path;
   name.toUpperCase();
   name.replace("\\",""); 
-  DEBF("Searching in <%s> for [%s] entry cluster:\r\n", _currentDir.c_str(), search_path.c_str());
+  ESP_LOGI("","Searching in <%s> for [%s] entry cluster:\r\n", _currentDir.c_str(), search_path.c_str());
   rewindDir();
   entry = nextEntry();
   while (!entry->is_end) {
     testname = entry->name;
     testname.toUpperCase();
-    //DEBF("compare <%s> <%s>\r\n", name.c_str(), testname.c_str());
+    //ESP_LOGI("","compare <%s> <%s>\r\n", name.c_str(), testname.c_str());
     if (testname == name) {
       first_cluster = clusterBySector(entry->sectors[0].first);
       break;
@@ -345,7 +352,7 @@ void SDMMC_FAT32::setCurrentDir(fpath_t dir_path){
   _currentCluster   = _startCluster;
   _startSector      = firstSectorOfCluster(_startCluster);
   _currentSector    = _startSector;
-  DEBF("SDMMC: Current ROOT set to <%s>\r\n", _currentDir.c_str() );
+  ESP_LOGI("","SDMMC: Current ROOT set to <%s>\r\n", _currentDir.c_str() );
 }
 
 
@@ -395,7 +402,7 @@ entry_t* SDMMC_FAT32::nextEntry() {
   while (!(ent->is_end)) {
     if (ent->is_dir>=0)
     {
-  //    DEBF("inside nextEntry() %s %d\r\n", ent->name.c_str(), ent->sectors[0].first); 
+  //    ESP_LOGI("","inside nextEntry() %s %d\r\n", ent->name.c_str(), ent->sectors[0].first); 
       return ent;
     }
     ent = buildNextEntry();
@@ -451,7 +458,7 @@ entry_t* SDMMC_FAT32::buildNextEntry() {
       n = lfn_entry.seqno;
       // helpers: lfn_is_first(n), lfn_is_last(n), lfn_is_deleted(n)
       if ( lfn_is_deleted(n) ) {
-//        DEBUG("\tSkipping deleted LFN entry");
+//        ESP_LOGI("","\tSkipping deleted LFN entry");
         _dirent_num++;
         continue;
       }
@@ -470,12 +477,12 @@ entry_t* SDMMC_FAT32::buildNextEntry() {
         continue; // skip deleted, empty, system and hidden, sysvol
       }
       shortname = to_8dot3(rec_array[_dirent_num].filename);
-//      DEBF(">>>\tShort name = <%s>\r\n", shortname.c_str());
+//      ESP_LOGI("",">>>\tShort name = <%s>\r\n", shortname.c_str());
       
     }
     if (entry_done) {
       filename = unicode2ascii(reinterpret_cast<uint16_t*>(&fname), MAX_NAME_LEN)  ;
-//      DEBF(">>>\tLong name = <%s>\r\n\r\n", filename.c_str());
+//      ESP_LOGI("",">>>\tLong name = <%s>\r\n\r\n", filename.c_str());
       if (shortname>"" && filename == "") filename = shortname;
       if (filename.endsWith(".")) filename.remove(filename.length()-1,1);
       _currentEntry.name = filename;
@@ -502,10 +509,10 @@ entry_t* SDMMC_FAT32::buildNextEntry() {
       }
       _currentEntry.sectors.push_back(chain);
 
-    //  DEB("First:");
-    //  DEBUG(chain.first);
-    //  DEB("Last:");
-     // DEBUG(chain.last);            
+    //  ESP_LOGI("","First:");
+    //  ESP_LOGI("",chain.first);
+    //  ESP_LOGI("","Last:");
+     // ESP_LOGI("",chain.last);            
       memset(&fname, 0, 513);
       _dirent_num++;
       return &_currentEntry;
@@ -517,7 +524,7 @@ entry_t* SDMMC_FAT32::buildNextEntry() {
 }
 
 void SDMMC_FAT32::printCurrentDir() {
-  DEBF("Directory <%s>:\r\n", _currentDir.c_str());
+  ESP_LOGI("","Directory <%s>:\r\n", _currentDir.c_str());
   const char cdir[] = {"<DIR>"};
   const char cfile[] = {""};
   rewindDir();
@@ -526,9 +533,9 @@ void SDMMC_FAT32::printCurrentDir() {
   ent = nextEntry();
   while (!(ent->is_end)) {
     if (ent->size >= 10240) {
-      DEBF("%d:\t%s\t%s\t%d kB\r\n", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size/1024);
+      ESP_LOGI("","%d:\t%s\t%s\t%d kB\r\n", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size/1024);
     } else {
-      DEBF("%d:\t%s\t%s\t%d Bytes\r\n", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size);
+      ESP_LOGI("","%d:\t%s\t%s\t%d Bytes\r\n", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size);
     }
     ent = nextEntry();
     i++;
@@ -547,10 +554,10 @@ int SDMMC_FAT32::fat_entry_type(uint32_t x) {
     if(x >= 0x2 && x <= 0xFFFFFEF)
         return USED_CLUSTER;
     if(x >= 0xFFFFFF0 && x <= 0xFFFFFF6)
-    //    DEBF("reserved value: %x\n", x);
+    //    ESP_LOGI("","reserved value: %x\n", x);
     if(x >=  0xFFFFFF8  && x <= 0xFFFFFFF)
         return LAST_CLUSTER;
-    // DEBF("impossible type value: %x\n", x);
+    // ESP_LOGI("","impossible type value: %x\n", x);
     return LAST_CLUSTER; //???
 }
 
@@ -615,53 +622,53 @@ int SDMMC_FAT32::dirent_is_deleted_lfn(sfn_dir_t *d) {
 }
 
 void SDMMC_FAT32::dirent_print_helper(sfn_dir_t *d) {
-    DEB(">>>\t");
+    ESP_LOGI("",">>>\t");
     if(dirent_free(d))  {
-        DEB("dirent is not allocated\n");
+        ESP_LOGI("","dirent is not allocated\n");
         return;
     }
     if(d->attr == FAT32_LONG_FILE_NAME) {
-        DEB("dirent is an LFN\n");
+        ESP_LOGI("","dirent is an LFN\n");
         return;
     }
     if(is_attr(d->attr, FAT32_ARCHIVE)) {
-        DEB("[ARCHIVE]: assuming short part of LFN:");
+        ESP_LOGI("","[ARCHIVE]: assuming short part of LFN:");
     } else if(!(is_attr(d->attr, FAT32_DIR))) {
-        DEBF("need to handle attr %x \n", d->attr);
+        ESP_LOGI("","need to handle attr %x \n", d->attr);
         if(is_attr(d->attr, FAT32_ARCHIVE))
             return;
     }
-    DEBF("\tfilename      = raw=<%s> 8.3=<%s>\n", add_nul(d->filename),to_8dot3(d->filename));
-    DEB("\tbyte version  = {");
+    ESP_LOGI("","\tfilename      = raw=<%s> 8.3=<%s>\n", add_nul(d->filename),to_8dot3(d->filename));
+    ESP_LOGI("","\tbyte version  = {");
     for(int i = 0; i < sizeof d->filename; i++) {
         if(i==8) {
-            DEB("\n");
-            DEB("\t\t\t\t");
+            ESP_LOGI("","\n");
+            ESP_LOGI("","\t\t\t\t");
         }
-        DEBF("[%c]/%x,", d->filename[i],d->filename[i]);
+        ESP_LOGI("","[%c]/%x,", d->filename[i],d->filename[i]);
     }
-    DEBUG("}");
+    ESP_LOGI("","}");
         
-    DEBF("\tattr         = %x ", d->attr);
+    ESP_LOGI("","\tattr         = %x ", d->attr);
     if(d->attr != FAT32_LONG_FILE_NAME) {
         if(d->attr&FAT32_RO)
-            DEB(" [Read-only]\n");
+            ESP_LOGI(""," [Read-only]\n");
         if(d->attr&FAT32_HIDDEN)
-            DEB(" [HIDDEN]\n");
+            ESP_LOGI(""," [HIDDEN]\n");
         if(d->attr&FAT32_SYSTEM_FILE)
-            DEB(" [SYSTEM FILE: don't move]\n");
-        DEBUG("");
+            ESP_LOGI(""," [SYSTEM FILE: don't move]\n");
+        ESP_LOGI("","");
     }
  
-    DEBF("\thi_start      = %x\n", d->hi_start);
-    DEBF("\tlo_start      = %d\n", d->lo_start);
-    DEBF("\tfile_nbytes   = %d\n", d->file_nbytes);
+    ESP_LOGI("","\thi_start      = %x\n", d->hi_start);
+    ESP_LOGI("","\tlo_start      = %d\n", d->lo_start);
+    ESP_LOGI("","\tfile_nbytes   = %d\n", d->file_nbytes);
 }
 
 void SDMMC_FAT32::lfn_print_ent(lfn_dir_t *l, uint8_t cksum) {
     uint8_t n = l->seqno;
     fname_t t;
-    DEBF(">>>\tseqno = %x, deleted=%d\n", n, lfn_is_deleted(n));
+    ESP_LOGI("",">>>\tseqno = %x, deleted=%d\n", n, lfn_is_deleted(n));
     uint8_t buf[27];
     memcpy(&buf[0],  l->name1_5,  10);
     memcpy(&buf[10], l->name6_11, 12);
@@ -671,9 +678,9 @@ void SDMMC_FAT32::lfn_print_ent(lfn_dir_t *l, uint8_t cksum) {
     for(int i = 0; i < 26; i += 2) {
         if(buf[i] == 0 && buf[i+1] == 0)
             break;
-        DEBF("\t\tlfn[%d] = [%c] = %x\n", i, buf[i], buf[i]);
+        ESP_LOGI("","\t\tlfn[%d] = [%c] = %x\n", i, buf[i], buf[i]);
     }
-    DEBF("\tcksum=%x (expected=%x)\n", l->cksum, cksum);
+    ESP_LOGI("","\tcksum=%x (expected=%x)\n", l->cksum, cksum);
 }
 
 

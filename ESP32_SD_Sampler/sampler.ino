@@ -3,29 +3,33 @@
 
 void SamplerEngine::init(SDMMC_FAT32* Card){
   _Card = Card;
+  bool good=true;
   _rootFolder = ROOT_FOLDER;
   _limitSameNotes = MAX_SAME_NOTES;
   _maxVoices = MAX_POLYPHONY;
   int num_sets = scanRootFolder();
   for (int i = 0; i < num_sets; i++) {
-    DEBF("Folder %d : %s\r\n" , i ,_folders[i].c_str());
+    ESP_LOGI("","Folder %d : %s\r\n" , i ,_folders[i].c_str());
   }
-  DEBF("Total %d folders with samples found\r\n", num_sets);
+  ESP_LOGI("","Total %d folders with samples found\r\n", num_sets);
   initKeyboard();
   for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
-    DEBF("Voice %d: ", i);
+    ESP_LOGI("","Voice %d: ", i);
     // sustain is global and needed for every voice, so we just pass a pointer to it.
-    Voices[i].init(Card, &_sustain, &_normalized);
+    if (!Voices[i].init(Card, &_sustain, &_normalized)) {
+      _maxVoices = i-1;
+      break;
+    }
     Voices[i].my_id = i;
   }
   if (num_sets > 0) {
     setSampleRate(SAMPLE_RATE);
-    DEBUG("+++");
+    ESP_LOGI("","+++");
   } else {
     while(true) {
       // loop forever
       delay(1000);
-      DEBUG("--- no samples found");
+      ESP_LOGI("","--- no samples found");
     }      
   }
   setReverbSendLevel(0.2f);
@@ -34,7 +38,7 @@ void SamplerEngine::init(SDMMC_FAT32* Card){
 
 int SamplerEngine::scanRootFolder() {  
   fpath_t dirname;
-  DEBUG("SAMPLER: Scanning root folder");
+  ESP_LOGI("","SAMPLER: Scanning root folder");
   SDMMC_FileReader Reader(_Card);
   _rootFolder = ROOT_FOLDER;
   _folders.clear();
@@ -46,7 +50,7 @@ int SamplerEngine::scanRootFolder() {
     if (entry->is_dir) {
       point_t p = _Card->getCurrentPoint();
       dirname = entry->name;      
-      DEBUG(dirname.c_str());
+      ESP_LOGI("", " dirname: %s" , dirname.c_str());
       _Card->setCurrentDir(dirname);
       if (Reader.open(INI_FILE) == ESP_OK ) {
         Reader.close();
@@ -67,7 +71,7 @@ inline int SamplerEngine::assignVoice(byte midi_note, byte velo){
   
   for (int i = 0 ; i < _maxVoices ; i++) {
     if (!Voices[i].isActive()){
-   //   DEBUG("SAMPLER: First vacant voice");
+   //   ESP_LOGI("","SAMPLER: First vacant voice");
       return (int)i;
     }
   }  
@@ -78,7 +82,7 @@ inline int SamplerEngine::assignVoice(byte midi_note, byte velo){
       id = i;
     }
   }
-  DEBUG("SAMPLER: No free slot: Steal a voice");
+  ESP_LOGI("","SAMPLER: No free slot: Steal a voice");
   return id;
 }
 
@@ -87,11 +91,11 @@ inline void SamplerEngine::noteOn(uint8_t midiNote, uint8_t velo){
   sample_t smp = _sampleMap[midiNote][mapVelo(velo)];
   for (int n = 0; n < ( ( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ); n++ ) {
     if (_groups[midiNote][n] == 255) break;    // terminate
-    DEBF("SAMPLER: GROUP KILL: %d\r\n", _groups[midiNote][n]);
+    ESP_LOGI("","SAMPLER: GROUP KILL: %d\r\n", _groups[midiNote][n]);
     noteOff(_groups[midiNote][n], Adsr::END_SEMI_FAST);      // provide exclusivity
   }
   if (smp.channels > 0) {
-   // DEBF("SAMPLER: voice %d note %d velo %d\r\n", i, midiNote, velo);
+   // ESP_LOGI("","SAMPLER: voice %d note %d velo %d\r\n", i, midiNote, velo);
     Voices[i].setStarted(false);
     Voices[i].setAttackTime(_keyboard[midiNote].attack_time);
     Voices[i].setDecayTime(_keyboard[midiNote].decay_time);
@@ -99,7 +103,7 @@ inline void SamplerEngine::noteOn(uint8_t midiNote, uint8_t velo){
     Voices[i].setSustainLevel(_keyboard[midiNote].sustain_level);
     Voices[i].start(_sampleMap[midiNote][mapVelo(velo)], midiNote, velo);
   } else {
-    DEBUG("SAMPLER: no sample assigned");
+    ESP_LOGI("","SAMPLER: no sample assigned");
     return;
   }
 }
@@ -108,7 +112,7 @@ inline void SamplerEngine::noteOff(uint8_t midiNote, Adsr::eEnd_t end_type ){
   if (_keyboard[midiNote].noteoff || end_type!= Adsr::END_REGULAR) {
     for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
       if (Voices[i].getMidiNote() == midiNote && Voices[i].isActive()) {      
-        // DEBF("SAMPLER: NOTE OFF Voice %d note %d \r\n", i, midiNote);
+        // ESP_LOGI("","SAMPLER: NOTE OFF Voice %d note %d \r\n", i, midiNote);
         Voices[i].setPressed(false);
         Voices[i].end(end_type);
       }
@@ -119,7 +123,7 @@ inline void SamplerEngine::noteOff(uint8_t midiNote, Adsr::eEnd_t end_type ){
 
 inline void SamplerEngine::setSustain(bool onoff) {
   _sustain = onoff; 
-  DEBF("SAMPLER: sustain: %d\r\n", onoff);
+  // ESP_LOGI("","SAMPLER: sustain: %d\r\n", onoff);
   if (!onoff) {
     for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
       if (_keyboard[Voices[i].getMidiNote()].noteoff && Voices[i].isActive() ) {
@@ -198,9 +202,9 @@ uint8_t SamplerEngine::unMapVelo(uint8_t mappedVelo) {
 
 void IRAM_ATTR SamplerEngine::fillBuffer() {
   // search and fill the most hungry buffer
-  static uint32_t hungerMax;
-  static uint32_t hunger;
-  static int iToFeed;
+  uint32_t hungerMax;
+  uint32_t hunger;
+  int iToFeed;
   hunger = hungerMax = 0;
   iToFeed = 0;
   for (int i=0; i<_maxVoices; i++) {
@@ -211,6 +215,7 @@ void IRAM_ATTR SamplerEngine::fillBuffer() {
     }
   }
   Voices[iToFeed].feed(); 
+  // ESP_LOGI("","SAMPLER: Fed voice id=%d hunger=%d\r\n", iToFeed, hunger);
 }
 
 
@@ -220,9 +225,7 @@ inline void SamplerEngine::setCurrentFolder(int folder_id) {
   _currentFolder = _folders[folder_id];
   _currentFolderId = folder_id;
   _Card->setCurrentDir(_rootFolder);
-  DEB(folder_id);
-  DEB(": ");
-  DEBUG(_folders[folder_id].c_str());
+  ESP_LOGI("", " folder_id %d name: %s", folder_id , _folders[folder_id].c_str());
   _Card->setCurrentDir(_folders[folder_id]);
   initKeyboard();               // it resets _keyboard[] which holds key-specific parameters
   parseIni();                   // this will read the sampler.ini file and prepare name template along with other parameters
@@ -234,9 +237,8 @@ inline void SamplerEngine::setCurrentFolder(int folder_id) {
       processNameParser(entry); // parse filenames basing on a prepared template
     }
   }
-  //printMapping();
   finalizeMapping();  // fill the gaps when we don't have dedicated samples for some pitches or velocity layers
-  printMapping();
+ // printMapping();
 }
 
 
@@ -262,7 +264,7 @@ void SamplerEngine::initKeyboard() {
     _keyboard[i].noteoff      = true;
     //_keyboard[i].velo_layer   = 1;
     _keyboard[i].tuning       = 1.0f;
-    // DEBF("%d:\t%s\t%s\t%d\t%7.3f\r\n", i, _keyboard[i].name[0].c_str(), _keyboard[i].name[1].c_str(), _keyboard[i].octave, _keyboard[i].freq);
+    // ESP_LOGI("","%d:\t%s\t%s\t%d\t%7.3f\r\n", i, _keyboard[i].name[0].c_str(), _keyboard[i].name[1].c_str(), _keyboard[i].octave, _keyboard[i].freq);
   }
 }
 
@@ -320,7 +322,7 @@ void SamplerEngine::getSample(float& sampleL, float& sampleR){
 
 void SamplerEngine::freeSomeVoices() {
   int id, n = 0;
-  static byte note_count[128];
+  byte note_count[128]; // better be a private class var maybe
   int midi_note;
   int desiredFree = SACRIFY_VOICES;
   float score;
@@ -343,6 +345,7 @@ void SamplerEngine::freeSomeVoices() {
           }
         }
         Voices[id].end(Adsr::END_FAST);
+        //ESP_LOGI("","SAMPLER: KILL SAME NOTE id=%d\r\n", id);
         return;
       }
       score = Voices[i].getKillScore();
@@ -354,6 +357,7 @@ void SamplerEngine::freeSomeVoices() {
   }
   if ( ( n + SACRIFY_VOICES ) > MAX_POLYPHONY ) {
     Voices[id].end(Adsr::END_FAST);
+    //ESP_LOGI("","SAMPLER: KILL EXTRA VOICE id=%d\r\n", id);
     return;
   }
 }

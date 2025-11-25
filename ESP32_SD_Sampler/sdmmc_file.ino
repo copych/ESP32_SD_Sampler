@@ -11,7 +11,7 @@ esp_err_t SDMMC_FileReader::open(fpath_t fname) {
   _bufPos = 0;
   entry_t* entry_p = _Card->findEntry(fname);
  
-  //DEBF("  &entry_p = %#010x\r\n",  entry_p);
+  //ESP_LOGI("","  &entry_p = %#010x\r\n",  entry_p);
   _entry = *entry_p;
   if (_entry.is_end) return 0x105; // NOT_FOUND
   return 0 ; // ESP_OK
@@ -42,7 +42,7 @@ void SDMMC_FileReader::read_line(str_max_t& str) {
   while (true) {
     
     if (_bufPos >= BYTES_PER_SECTOR) {
-    //  DEBUG("Next sector");
+    //  ESP_LOGI("","Next sector");
       _bufPos = 0;
       sec = _Card->getNextSector(_sectorRead);
       char* tmp = reinterpret_cast<char*>(_Card->readSector(sec));
@@ -54,20 +54,20 @@ void SDMMC_FileReader::read_line(str_max_t& str) {
       str += '\0';
       _filePos++;
       _bufPos++;
-     // DEBUG("FixedString limit");
+     // ESP_LOGI("","FixedString limit");
       break; // FixedString overflow
     }
     if (_filePos >= _entry.size) {
       str += '\0';
       _entry.is_end = 1;
-     // DEBUG("EOF");
+     // ESP_LOGI("","EOF");
       break; // EOF
     }
     if ( ch == '\0' || ch == '\n' ) {
       _bufPos++;
       _filePos++;
       str += '\0';
-     // DEBUG("EOL");
+     // ESP_LOGI("","EOL");
       break; // EOL
     }
     if (ch != '\r') {
@@ -78,5 +78,5 @@ void SDMMC_FileReader::read_line(str_max_t& str) {
     _filePos++;
   }
   str.trim();
- // DEBF("position: buf=%d file=%d str=%d \r\n", _bufPos, _filePos, str_pos);
+ // ESP_LOGI("","position: buf=%d file=%d str=%d \r\n", _bufPos, _filePos, str_pos);
 }

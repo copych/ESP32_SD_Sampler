@@ -1,7 +1,7 @@
 #pragma once
 
 #define DMA_NUM_BUF 2                     // number of I2S buffers, 2 should be enough
-#define DMA_BUF_LEN 64                    // length of I2S buffers use 8 samples or more
+#define DMA_BUF_LEN 32                    // length of I2S buffers use 8 samples or more
 #define FASTLED_INTERNAL                  // remove annoying pragma messages
 
 const float MIDI_NORM           = (1.0f / 127.0f);
@@ -36,16 +36,7 @@ const float DIV_SAMPLE_RATE = 1.0f/(float)(SAMPLE_RATE);
 #endif
 
 
-// debug macros
-#ifdef DEBUG_ON 
-  #define DEB(...)    DEBUG_PORT.print(__VA_ARGS__) 
-  #define DEBF(...)   DEBUG_PORT.printf(__VA_ARGS__)
-  #define DEBUG(...)  DEBUG_PORT.println(__VA_ARGS__)
-#else
-  #define DEB(...)
-  #define DEBF(...)
-  #define DEBUG(...)
-#endif
+ 
 
 // lookup tables
 #define TABLE_BIT            5UL           // bits per index of lookup tables. 10 bit means 2^10 = 1024 samples. Values from 5 to 11 are OK. Choose the most appropriate.
@@ -89,8 +80,17 @@ static __attribute__((always_inline)) inline float fast_semitones2speed(float se
 }
 
 static __attribute__((always_inline)) inline float fclamp(float in, float min, float max){
-  return fmin(fmax(in, min), max);
+  if (in>max) return max;
+  if (in<min) return min;
+  return in;
 }
+
+static __attribute__((always_inline)) inline float flimit(float in){
+  if (in>1.0f) return 1.0f;
+  if (in<-1.0f) return -1.0f;
+  return in;
+}
+
 
 static __attribute__((always_inline)) inline float one_div(float a) {
     float result;

@@ -48,7 +48,7 @@ inline void MidiInit() {
     MIDI_usbDev.setHandlePitchBend(handlePitchBend);
     MIDI_usbDev.setHandleProgramChange(handleProgramChange);
     MIDI_usbDev.begin(RECEIVE_MIDI_CHAN);
-    DEBUG("USB device started");
+    ESP_LOGI("","USB device started");
 #endif
 }
 
@@ -92,75 +92,75 @@ void handleCC(uint8_t inChannel, uint8_t cc_number, uint8_t cc_value) {
     case CC_RESO:
       scaled = (float)cc_value * MIDI_NORM;
       DJFilter.SetResonance(scaled);
-      DEBF("Set Resonance %f\r\n", scaled);
+      ESP_LOGI("","Set Resonance %f\r\n", scaled);
       break;
     case CC_CUTOFF:
       scaled = (float)cc_value * MIDI_NORM;
       DJFilter.SetCutoff(scaled);
-      DEBF("Set Cutoff %f\r\n", scaled);
+      ESP_LOGI("","Set Cutoff %f\r\n", scaled);
       break;
     case CC_COMPRESSOR:
       scaled = 3.0f + cc_value * 0.307081f;
       Comp.SetRatio(scaled);
-      DEBF("Set Comp Ratio %f\r\n", scaled);
+      ESP_LOGI("","Set Comp Ratio %f\r\n", scaled);
       break;
 */
     case CC_ENV_DECAY:
       scaled = midiToExpTime(cc_value);
       Sampler.setDecayTime(scaled);
-      DEBF("SAMPLER: MIDI: Env Set Decay Time %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Env Set Decay Time %f s\r\n", scaled);
       break;
     case CC_ENV_ATTACK:
       scaled = midiToExpTime(cc_value);
       Sampler.setAttackTime(scaled);
-      DEBF("SAMPLER: MIDI: Env Set Attack Time %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Env Set Attack Time %f s\r\n", scaled);
       break;
     case CC_ENV_RELEASE:
       scaled = midiToExpTime(cc_value);
       Sampler.setReleaseTime(scaled);
-      DEBF("SAMPLER: MIDI: Env Set Release Time %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Env Set Release Time %f s\r\n", scaled);
       break;
     case CC_ENV_SUSTAIN:
       scaled = (float)cc_value * MIDI_NORM;
       Sampler.setSustainLevel(scaled);
-      DEBF("SAMPLER: MIDI: Env Set Sustain Level %f\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Env Set Sustain Level %f\r\n", scaled);
       break;
     case CC_REVERB_TIME:
       scaled = (float)cc_value * MIDI_NORM;
       Reverb.SetTime(scaled);
-      DEBF("SAMPLER: MIDI: Reverb Set Time %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Reverb Set Time %f s\r\n", scaled);
       break;
     case CC_REVERB_LVL:
       scaled = (float)cc_value * MIDI_NORM;
       Reverb.SetLevel(scaled);
-      DEBF("SAMPLER: MIDI: Reverb Set Level %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Reverb Set Level %f s\r\n", scaled);
       break;
 /*
     case CC_DELAY_TIME:
       scaled = (float)cc_value * MIDI_NORM;
       Delay.SetLength(scaled);
-      DEBF("SAMPLER: MIDI: Delay Set Time %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Delay Set Time %f s\r\n", scaled);
       break;
     case CC_DELAY_FB:
       scaled = (float)cc_value * MIDI_NORM;
       Delay.SetFeedback(scaled);
-      DEBF("SAMPLER: MIDI: Delay Set Feedback %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Delay Set Feedback %f s\r\n", scaled);
       break;
     case CC_DELAY_LVL:
       scaled = (float)cc_value * MIDI_NORM;
       Delay.SetLevel(scaled);
-      DEBF("SAMPLER: MIDI: Deleay Set Level %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Deleay Set Level %f s\r\n", scaled);
       break;
     case CC_DELAY_SEND:
       scaled = (float)cc_value * MIDI_NORM;
       Sampler.setDelaySendLevel(scaled);
-      DEBF("SAMPLER: MIDI: Set Send To Delay %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Set Send To Delay %f s\r\n", scaled);
       break;
 */
     case CC_REVERB_SEND:
       scaled = (float)cc_value * MIDI_NORM;
       Sampler.setReverbSendLevel(scaled);
-      DEBF("SAMPLER: MIDI: Set Send To Reverb %f s\r\n", scaled);
+      ESP_LOGI("","SAMPLER: MIDI: Set Send To Reverb %f s\r\n", scaled);
       break;
     case CC_RESET_CCS:
     case CC_NOTES_OFF:

@@ -6,7 +6,6 @@
 
 const int   BUF_SIZE_BYTES      = (READ_BUF_SECTORS * BYTES_PER_SECTOR);
 const float DIV_BUF_SIZE_BYTES  = (1.0f / BUF_SIZE_BYTES);
-const int   INTS_PER_SECTOR     = (BYTES_PER_SECTOR / 2);
 const int   start_byte[5]       = { 0, 0, 0, 1, 2 }; // offset values for [-], 8, 16, 24, 32 pcm bits per channel 
 
 #include "adsr.h"
@@ -54,7 +53,7 @@ typedef struct {
 class Voice {
   public:
     Voice(){};
-    void              init(SDMMC_FAT32* Card, bool* sustain, bool* normalized);
+    bool              init(SDMMC_FAT32* Card, uint32_t* sustain, uint32_t* normalized);
     bool              allocateBuffers();
     void              getSample(float& L, float& R);
     inline float      interpolate(float& s1, float& s2, float i);
@@ -63,12 +62,12 @@ class Voice {
     void              fadeOut();
     void              feed();
     inline uint32_t   hunger();
-    inline void       setStarted(bool st)   {_started = st;}
-    inline void       setPressed(bool pr)   {_pressed = pr;}
+    inline void       setStarted(uint32_t st)   {_started = st;}
+    inline void       setPressed(uint32_t pr)   {_pressed = pr;}
     inline void       setPitch(float speedModifier);
     inline int        getChannels()   {return _sampleFile.channels;}
-    inline bool       isActive()      {return _active;}
-    inline bool       isDying()       {return _dying;}
+    inline uint32_t       isActive()      {return _active;}
+    inline uint32_t       isDying()       {return _dying;}
     inline uint8_t    getMidiNote()   {return _midiNote;}
     inline uint8_t    getMidiVelo()   {return _midiVelo;}
     inline uint32_t   getBufPlayed()  {return _bufPlayed;}
@@ -86,17 +85,18 @@ class Voice {
   private:
   // some members are volatile because they are used in different tasks on both cores, while real-time conditions require immediate changes without caching 
     SDMMC_FAT32*        _Card                   ;
-    bool*               _sustain                ; // every voice needs to know if sustain is ON. 
-    bool*               _normalized             ;
-    float               _amp                    = 1.0f;    
-    bool                _active                 = false;
-    volatile bool       _dying                  = false;
-    volatile bool       _started                = false;
-    uint8_t*            _buffer0;                         // pointer to the 1st allocated SD-reader buffer
-    uint8_t*            _buffer1;                         // pointer to the 2nd allocated SD-reader buffer
-    uint8_t*            _playBuffer;                      // pointer to the buffer which is being played (one of the two toggling buffers)
-    uint8_t*            _fillBuffer;                      // pointer to the buffer which awaits filling (one of the two toggling buffers)
+    uint32_t*               _sustain                ; // every voice needs to know if sustain is ON. 
+    uint32_t*               _normalized             ;
+    float WORD_ALIGNED_ATTR              _amp                    = 1.0f;    
+    uint32_t                _active                 = false;
+    volatile uint32_t       _dying                  = false;
+    volatile uint32_t       _started                = false;
+    uint8_t* WORD_ALIGNED_ATTR           _buffer0;                         // pointer to the 1st allocated SD-reader buffer
+    uint8_t* WORD_ALIGNED_ATTR           _buffer1;                         // pointer to the 2nd allocated SD-reader buffer
+    uint8_t* WORD_ALIGNED_ATTR           _playBuffer;                      // pointer to the buffer which is being played (one of the two toggling buffers)
+    uint8_t* WORD_ALIGNED_ATTR           _fillBuffer;                      // pointer to the buffer which awaits filling (one of the two toggling buffers)
     uint32_t            _bufSizeBytes           = BUF_SIZE_BYTES;
+    uint32_t            _read_buf_sectors       = READ_BUF_SECTORS;
     uint32_t            _bufSizeSmp             = 0;
     int                 _changedBufBytes        = 0;
     uint32_t            _hunger                 = 0;
@@ -104,14 +104,14 @@ class Voice {
     uint32_t            _bytesToPlay            = 0;
     int                 _playBufOffset          = 0;      // play-buffer byte offset till the 1st sample
     int                 _fillBufOffset          = 0;      // fill-buffer byte offset till the 1st sample
-    volatile int        _pL1, _pL2, _pR1, _pR2  ;
+    volatile int WORD_ALIGNED_ATTR       _pL1, _pL2, _pR1, _pR2  ;
     int                 _samplesInFillBuf       = 0;
     int                 _samplesInPlayBuf       = 0;
-    volatile int        _posSmp                 = 0;      // global position in terms of samples
-    volatile int        _bufPosSmp[2]           = {0, 0}; // sample pos, it depends on the number of channels and bit depth of a wav file assigned to this voice;
-    float               _bufPosSmpF             = 0.0f;   // exact calculated sample reading position including speed, pitchbend etc. 
+    volatile int WORD_ALIGNED_ATTR       _posSmp                 = 0;      // global position in terms of samples
+    volatile int WORD_ALIGNED_ATTR       _bufPosSmp[2]           = {0, 0}; // sample pos, it depends on the number of channels and bit depth of a wav file assigned to this voice;
+    float WORD_ALIGNED_ATTR              _bufPosSmpF             = 0.0f;   // exact calculated sample reading position including speed, pitchbend etc. 
     bool                _bufEmpty[2]            = {true, true};
-    uint32_t            _fullSampleBytes        = 4;      // bytes
+    uint32_t WORD_ALIGNED_ATTR           _fullSampleBytes        = 4;      // bytes
     float               _divFileSize            = 0.001f;
     float               _divVelo                = 0;
     volatile int        _idToFill               = 0;      // tic-tac buffer id
@@ -126,11 +126,11 @@ class Voice {
     uint32_t            _coarseBytesPlayed      = 0;
     uint32_t            _bytesPlayed            = 0;
     float               _amplitude              = 0.0f;
-    volatile bool       _pressed                = false;
-    volatile bool       _eof                    = true;
+    volatile uint32_t       _pressed                = false;
+    volatile uint32_t       _eof                    = true;
     volatile float      _killScoreCoef          = 1.0f;
     volatile float      _hungerCoef             = 1.0f;
-    bool                _loop                   = false;
+    uint32_t                _loop                   = false;
     int                 _loopState              = 0;
     uint32_t            _loopFirstSmp           = 0;
     uint32_t            _loopLastSmp            = 0;
@@ -138,5 +138,5 @@ class Voice {
     uint32_t            _loopLastSector         = 0;
     int                 _lowest                 = 1;
     Adsr                AmpEnv                  ;
-    sample_t            _sampleFile             ;
+    sample_t WORD_ALIGNED_ATTR            _sampleFile             ;
 };

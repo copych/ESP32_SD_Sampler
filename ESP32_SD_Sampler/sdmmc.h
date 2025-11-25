@@ -126,7 +126,7 @@ class SDMMC_FAT32 {
     esp_err_t get_mbr();
     esp_err_t get_bpb(); 
     
-  private:
+  private: 
     struct __attribute__((packed)) {
       uint8_t   code[440];
       uint32_t  diskSerial;   // This is optional

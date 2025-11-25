@@ -63,6 +63,7 @@ typedef struct {
   float       decay_time    = 0.01f;
   float       sustain_level = 1.0f;
   float       release_time  = 0.05f;
+  bool        loop          = false;
 } midikey_t;
 
 typedef struct {
@@ -139,7 +140,7 @@ class SamplerEngine {
     void            resetSamples();
     uint8_t         midiNoteByName(str8_t noteName);
     void            printMapping();
-    sample_t        _sampleMap[128][MAX_VELOCITY_LAYERS];
+    sample_t WORD_ALIGNED_ATTR       _sampleMap[128][MAX_VELOCITY_LAYERS];
     midikey_t       _keyboard[128];
     uint8_t         _groups[128][ ( ( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ) ];      // each of 128 elements contains notes to shoot when it starts
     float           _ampCurve[128];       // velocity to amplification mapping [0.0 ... 1.0] to make seamless velocity response curve
@@ -155,8 +156,8 @@ class SamplerEngine {
     volatile int    _currentFolderId      = 0;
     fname_t         _currentFolder        ;
     int             _sampleSetsCount      = 0;    
-    float           _sendDelay            = 0.0f;
-    float           _sendReverb           = 0.0f;
+    float           _sendDelay            = 0.3f;
+    float           _sendReverb           = 0.3f;
     float           _amp                  = 0.9f;
     float           _pano                 = 0.5f;
     float           _attackTime           = 0.0f;
@@ -167,11 +168,11 @@ class SamplerEngine {
     int             _pitchBendSemitones   = 2;
     eVoiceAlloc_t   _voiceAllocMethod     = VA_OLDEST; // not implemented, VA_PERCEPTUAL is gonna be the only one
     int             _parser_i             = 0;
-    bool            _normalized           = false;
-    bool            _sustain              = false;
+    uint32_t            _normalized           = false;
+    uint32_t            _sustain              = false;
     eInstr_t        _type                 = SMP_MELODIC;
     str64_t         _title                = "";
-    Voice           Voices[MAX_POLYPHONY]  ;
+    Voice WORD_ALIGNED_ATTR          Voices[MAX_POLYPHONY]  ;
     variants_t      _veloVars              ;
     std::vector<fname_t>          _folders ;
     std::vector<template_item_t>  _template;

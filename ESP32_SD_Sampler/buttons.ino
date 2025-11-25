@@ -12,7 +12,6 @@ const unsigned long autoFireDelay = 500;      // the threshold (in milliseconds)
 const unsigned long riseThreshold = 20;       // the threshold (in milliseconds) for a button press to be confirmed (i.e. debounce, not "noise")
 const unsigned long fallThreshold = 10;       // debounce, not "noise", also this is the time, while new "touches" won't be registered
 
-
 void readButtonsState(uint32_t &activeFlags) {
   activeFlags=0;
 #if MUXED_BUTTONS > 0
@@ -51,7 +50,7 @@ bool readMuxed(int channel) {
 }
 #endif
 
-#ifdef ECN_CLK
+#ifdef ENC_CLK
 void processEncoder() { // idea was taken from Alex Gyver's examples
   static int newState = 0;
   static int oldState = 0;
@@ -60,9 +59,9 @@ void processEncoder() { // idea was taken from Alex Gyver's examples
 
   unsigned int clk = digitalRead(ENC_CLK)==LOGICAL_ON;
   unsigned int dt = digitalRead(ENC_DT)==LOGICAL_ON;
-  DEB(clk);
-  DEB("\t");
-  DEBUG(dt);
+  ESP_LOGI("",clk);
+  ESP_LOGI("","\t");
+  ESP_LOGI("",dt);
   newState = (clk | dt << 1);
   if (newState != oldState) {
     int stateMux = newState | (oldState << 2);
@@ -163,53 +162,40 @@ void processButtons() {
 // activeButtonsBitmask flags all the active buttons 
 // each binary digit contains a state: 0 = inactive, 1 = active
 void onTouch (uint8_t buttonNumber, uint32_t activeButtonsBitmask) {
-  DEB("Flags: ");
-  DEB(activeButtonsBitmask);
-  DEB(" Touch: ");
-  DEBUG(buttonNumber);
+  ESP_LOGI("","Flags: %d Touch: %d",activeButtonsBitmask , buttonNumber);
+
 }
   
 void onPress (uint8_t buttonNumber, uint32_t activeButtonsBitmask) {
-  DEB("Flags: ");
-  DEB(activeButtonsBitmask);
-  DEB(" Press: ");
-  DEBUG(buttonNumber);
+
+  ESP_LOGI("","Flags: %d Press: %d",activeButtonsBitmask , buttonNumber);
   Sampler.setNextFolder();
- 
+  c_major();
 }
   
 void onClick (uint8_t buttonNumber, uint32_t activeButtonsBitmask) {
-  DEB("Flags: ");
-  DEB(activeButtonsBitmask);
-  DEB(" Click: ");
-  DEBUG(buttonNumber);
+  
+  ESP_LOGI("","Flags: %d Click: %d",activeButtonsBitmask , buttonNumber);
 }
   
 void onLongPress (uint8_t buttonNumber, uint32_t activeButtonsBitmask) {
-  DEB("Flags: ");
-  DEB(activeButtonsBitmask);
-  DEB(" Long Press: ");
-  DEBUG(buttonNumber);
+  
+  ESP_LOGI("","Flags: %d LongPress: %d",activeButtonsBitmask , buttonNumber);
 }
   
 void onAutoClick (uint8_t buttonNumber, uint32_t activeButtonsBitmask) {
-  DEB("Flags: ");
-  DEB(activeButtonsBitmask);
-  DEB(" AutoFire: ");
-  DEBUG(buttonNumber);
+  
+  ESP_LOGI("","Flags: %d AutoClick: %d",activeButtonsBitmask , buttonNumber);
 }
 
 void onRelease (uint8_t buttonNumber, uint32_t activeButtonsBitmask) {
-  DEB("Flags: ");
-  DEB(activeButtonsBitmask);
-  DEB(" Release: ");
-  DEBUG(buttonNumber);
+  
+  ESP_LOGI("","Flags: %d Release: %d",activeButtonsBitmask , buttonNumber);
  
 }
 #ifdef ENC_CLK
 void encoderMove (int8_t rotation) {
-  DEB("Encoder: ");
-  DEBUG(rotation);
+  ESP_LOGI("","Encoder: %d", rotation);
   // Check Rotary-Encoder-Movements
  
 }
