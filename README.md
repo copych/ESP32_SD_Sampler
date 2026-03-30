@@ -1,17 +1,17 @@
 !Attention! ESP Arduino cores v.3.1.2 and 3.1.3 have some bug that won't allow i2s driver to install when PSRAM is enabled, please, avoid using these versions!
 
-# ESP32-S3 SD Sampler
-ESP32-S3 SD Sampler is a polyphonic music synthesizer, which can play PCM WAV samples directly from an SD (microSD) card connected to an ESP32-S3.
+# ESP32 SD Sampler
+ESP32 SD Sampler is a polyphonic music synthesizer, which can play PCM WAV samples directly from an SD (microSD) card connected to an ESP32-S3 or ESP32-P4.
 Simple: one directory = one sample set. Plain text "sampler.ini" manages how samples to be spread over the keyboard.
 The main difference, comparing to the projects available on the net, is that this sampler WON'T try to preload all the stuff into the RAM/PSRAM to play it on demand. So it's not limited in this way by the size of the memory chip and can take really huge (per-note true sampled multi-velocity several gigabytes) sample sets. It only requires that the card is freshly formatted FAT32 and has no or very few bad blocks (actually it requires that the WAV files are written with little or no fragmentation at all). On start it analyzes existing file allocation table (FAT) and forms it's own sample lookup table to be able to access data immediately, using SDMMC with a 4-bit wide bus.
 
 # Features
-* Easy to build and to customize Arduino code for ESP32S3
+* Easy to build and to customize Arduino code for ESP32S3/ESP32P4
 * Hardware would cost you about $15, including a microSD card
 * Audio output is 44100Hz 16bit stereo
 * Direct read-only access to the sample sets on an SD/microSD card: it's based on custom sdmmc routines and it's fast
 * Size of a sample set is only limited by the card size
-* Polyphony of 15-20 stereo voices depending on your card's specs
+* Polyphony of 15-20 stereo voices depending on your MCU and card's specs
 * 16/24 bit WAV files supported
 * Melodic and percussive sample sets supported
 * ADSR envelope, per-note configurable
@@ -41,7 +41,7 @@ The main difference, comparing to the projects available on the net, is that thi
     * ```Fixed string library``` https://github.com/fatlab101/FixedString
     * ```Arduino MIDI library``` https://github.com/FortySevenEffects/arduino_midi_library
     * [optionally] If you want to use RGB LEDs, then also ```FastLED library``` is needed https://github.com/FastLED/FastLED
-* Download the [zipped code](https://github.com/copych/ESP32_S3_Sampler/archive/refs/heads/main.zip) or use git commands to get the project files
+* Download the [zipped code](https://github.com/copych/ESP32_SD_Sampler/archive/refs/heads/main.zip) or use git commands to get the project files
 * Unpack and place ```ESP32_SD_Sampler``` folder to your Arduino projects directory
 * Open ```ESP32_SD_Sampler.ino``` file with Arduino IDE
 * Connect your board via USB to your computer, select the corresponding ```port``` in the ```Tools``` menu and press the ```Upload``` button in the Arduino IDE
@@ -86,10 +86,10 @@ amplify = 1.2
 
 ; ADSR times in seconds
 attackTime = 0.0
-decayTime = 0.05
-releaseTime = 12.0
+decayTime = 12.0
+releaseTime = 0.1
 ; ADSR sustain level 0.0 - 1.0
-sustainLevel = 1.0
+sustainLevel = 0.0
 
 # !!!!!!!!!!!!!!! "enveloped=bool" is no longer supported, as the ADSR is always applyed
 
