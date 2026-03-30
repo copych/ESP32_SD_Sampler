@@ -43,6 +43,7 @@ sectors per read  |  reading speed, MB/s
  * Connections for     ¦   ¦   г===¦=¦=¦===¬   ¦  ¦    ¦
  * full-sized          ¦   ¦   ¦   г=- ¦   ¦   ¦  ¦    ¦
  * SD card             ¦   ¦   ¦   ¦   ¦   ¦   ¦  ¦    ¦
+ * ESP32-P4 DevKit  | 40  39  GND  43 3V3 GND  44 42  41  |
  * ESP32-S3 DevKit  | 21  47  GND  39 3V3 GND  40 41  42  |
  * ESP32-S3-USB-OTG | 38  37  GND  36 3V3 GND  35 34  33  |
  * ESP32            |  4   2  GND  14 3V3 GND  15 13  12  |
@@ -70,7 +71,7 @@ sectors per read  |  reading speed, MB/s
  *  
  */
 #include "sdmmc_types.h"
-//#define USE_MUTEX
+ 
 
 
 /* 
@@ -165,13 +166,13 @@ class SDMMC_FAT32 {
       uint8_t   fileSystemType[8]; 
       uint8_t   bootData[420];
       uint16_t  bootEndSignature; 
-    } bpbStruct;
+    } bpbStruct ;
 
-    uint8_t sector_buf[BYTES_PER_SECTOR]; // read_sector(sector) uses this buf
+    uint8_t sector_buf[BYTES_PER_SECTOR]  ; // read_sector(sector) uses this buf
     volatile uint32_t  _sectorInBuf = 0;
     volatile int       _dirent_num = 0;
 
-    uint8_t dir_cache[BYTES_PER_SECTOR * DIR_CACHE_SECTORS]; // cache_dir()
+    uint8_t dir_cache[BYTES_PER_SECTOR * DIR_CACHE_SECTORS]  ; // cache_dir()
 
     union {
       uint32_t uint32[BYTES_PER_SECTOR * FAT_CACHE_SECTORS / 4];
@@ -184,8 +185,8 @@ class SDMMC_FAT32 {
     uint8_t   _numFats;
     uint32_t  _reservedSectors;
     uint32_t  _sectorsPerFat;
-    uint32_t  _bytesPerSector;
-    uint32_t  _sectorsPerCluster;
+    uint32_t  _bytesPerSector=1;
+    uint32_t  _sectorsPerCluster=1;
     uint32_t  _rootCluster;
     uint32_t  _sectorsTotal;
     volatile uint32_t  _firstCachedFatSector = 0;
@@ -247,7 +248,5 @@ class SDMMC_FAT32 {
     int lfn_terminator(uint8_t*);
     void lfn_print(lfn_dir_t*, int, uint8_t, int); 
     fname_t unicode2ascii(uint16_t*, int len);
-    #ifdef USE_MUTEX
-    SemaphoreHandle_t mutex;
-    #endif
+
 };

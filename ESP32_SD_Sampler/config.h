@@ -10,19 +10,27 @@
 #define SAMPLE_RATE           44100       // audio output sampling rate
 
 //#define MIDI_VIA_SERIAL                   // use this option to enable Hairless MIDI on Serial port @115200 baud (USB connector), THIS WILL BLOCK SERIAL DEBUGGING
-#define MIDI_VIA_SERIAL2                  // use this option if you want to operate by standard MIDI @31250baud, UART2 (Serial2), 
-//#define MIDI_USB_DEVICE                     // use this option if you want to operate via USB with the sampler seen as a MIDI device (consumes RAM)
+//#define MIDI_VIA_SERIAL2                  // use this option if you want to operate by standard MIDI @31250baud, UART2 (Serial2), 
+#define MIDI_USB_DEVICE                     // use this option if you want to operate via USB with the sampler seen as a MIDI device (consumes RAM)
 
 #define RECEIVE_MIDI_CHAN     0
 
 //******************************************************* FILESYSTEM **********************************************
 #define INI_FILE              "sampler.ini"
 #define ROOT_FOLDER           "/"         // only </> is supported yet
-#define READ_BUF_SECTORS      5           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
 
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+  #define READ_BUF_SECTORS      5           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
+#elif defined CONFIG_IDF_TARGET_ESP32P4
+  #define READ_BUF_SECTORS      8           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
+#endif
 
 //******************************************************* SAMPLER **********************************************
-#define MAX_POLYPHONY         15          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 156
+#ifdef CONFIG_IDF_TARGET_ESP32S3
+  #define MAX_POLYPHONY         15          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 156
+#elif defined CONFIG_IDF_TARGET_ESP32P4
+  #define MAX_POLYPHONY         20          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 180
+#endif
 #define SACRIFY_VOICES        1           // voices used for smooth transisions to avoid clicks
 #define MAX_SAME_NOTES        2           // number of voices allowed playing the same note
 #define MAX_VELOCITY_LAYERS   16
@@ -33,6 +41,7 @@
 
 //******************************************************* PINS **********************************************
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
+  #define BUTTON1_GPIO 0
 // ESP32 S3
  // #define RGB_LED         38      // RGB LED as a vital sign
   #define MIDIRX_PIN      4       // this pin is used for input when MIDI_VIA_SERIAL2 defined (note that default pin 17 won't work with PSRAM)
@@ -70,15 +79,15 @@
   // 
   // DON'T YOU set LOLIN S3 PRO as a target board in Arduino IDE, or you may have problems with MIDI. 
   // SET generic ESP32S3 Dev Module as your target
-
+/*
   #define SDMMC_CMD 11  // LOLIN PCB hardlink
   #define SDMMC_CLK 12  // PCB hardlink
   #define SDMMC_D0  13  // PCB hardlink
   #define SDMMC_D1  18   // my choice //was 8 before
   #define SDMMC_D2  10  // my choice
   #define SDMMC_D3  46  // PCB hardlink
+*/
 
-/*
 // ESP32S3 allows almost any GPIOs for any particular needs
 #define SDMMC_CMD 38
 #define SDMMC_CLK 39
@@ -86,7 +95,29 @@
 #define SDMMC_D1  11
 #define SDMMC_D2  12
 #define SDMMC_D3  13
-*/
+
+
+#elif defined(CONFIG_IDF_TARGET_ESP32P4)
+  #define BUTTON1_GPIO 8
+  #define MIDIRX_PIN      15      // if USE_MIDI_STANDARD is selected as MIDI_IN, this pin receives MIDI messages
+  #define MIDITX_PIN      14
+
+  // ===================== I2S PINS ===================================================================================
+  #define I2S_BCLK_PIN    48       // I2S BIT CLOCK pin (BCL BCK CLK)
+  #define I2S_DOUT_PIN    47       // MCU Data Out: connect to periph. DATA IN (DIN D DAT)
+  #define I2S_WCLK_PIN    46       // I2S WORD CLOCK pin (WCK WCL LCK)
+  #define I2S_DIN_PIN     -1      // MCU Data In: connect to periph. DATA OUT (DOUT D SD)
+  
+  // ===================== SD MMC PINS ================================================================================
+  // ESP32P4 SPI slot 0 is LOCKED to hardware pins, DON't change it unless you switch to SLOT 1
+  // slot 0 defaults:
+  #define SDMMC_D0  39
+  #define SDMMC_D1  40
+  #define SDMMC_D2  41
+  #define SDMMC_D3  42
+  #define SDMMC_CLK 43
+  #define SDMMC_CMD 44
+  
 
 #elif defined(CONFIG_IDF_TARGET_ESP32)
 // ESP32

@@ -1,6 +1,4 @@
-
-
-//#define DEBUG_MASTER_OUT
+// #define DEBUG_MASTER_OUT
 
 
 #if ESP_ARDUINO_VERSION_MAJOR < 3
@@ -56,7 +54,7 @@ static void i2s_output () {
     out_buf[i*2] = (float)0x7fff * mix_buf_l[i]; 
     out_buf[i*2+1] = (float)0x7fff * mix_buf_r[i];
    // if (i%4==0) ESP_LOGI("",out_buf[i*2]);
-   // if (out_buf[i*2]) ESP_LOGI(""," %d\r\n ", out_buf[i*2]);
+   // if (out_buf[i*2]) ESP_LOGI(""," %d ", out_buf[i*2]);
   }
   i2s_write(i2s_num, out_buf, sizeof(out_buf), &bytes_written, portMAX_DELAY);
 
@@ -110,8 +108,8 @@ static void i2s_output () {
   // now out_buf is ready, output
   size_t* bytes_written;
   for (int i=0; i < DMA_BUF_LEN; i++) {
-    out_buf[i*2] = (float)0x7fff * mix_buf_l[i]; 
-    out_buf[i*2+1] = (float)0x7fff * mix_buf_r[i];
+    out_buf[i*2] = (float)0x7ffe * mix_buf_l[i] + 1; 
+    out_buf[i*2+1] = (float)0x7ffe * mix_buf_r[i] + 1;
   } 
   i2s_channel_write(tx_handle, out_buf, sizeof(out_buf), bytes_written, portMAX_DELAY);
 }
@@ -179,17 +177,17 @@ static void mixer() { // sum buffers
 
   // if none of the following limitters is engaged, digital clipping can occur
 
-   //   mix_buf_l[i] = fclamp(mix_buf_l[i] , -1.0f, 1.0f); // clipper
-   //   mix_buf_r[i] = fclamp(mix_buf_r[i] , -1.0f, 1.0f);
+      mix_buf_l[i] = fclamp(mix_buf_l[i] , -1.0f, 1.0f); // clipper
+      mix_buf_r[i] = fclamp(mix_buf_r[i] , -1.0f, 1.0f);
 
-      mix_buf_l[i] = fast_shape( mix_buf_l[i]); // soft limitter/saturator
-      mix_buf_r[i] = fast_shape( mix_buf_r[i]);
+   //   mix_buf_l[i] = fast_shape( mix_buf_l[i]); // soft limitter/saturator
+   //   mix_buf_r[i] = fast_shape( mix_buf_r[i]);
    }
    
 #ifdef DEBUG_MASTER_OUT
   meter *= 0.95f;
   meter += fabs(mono_mix); 
-  ESP_LOGI("","out= %0.5f\r\n", meter);
+  ESP_LOGI("","out= %0.5f", meter);
 #endif
 }
 

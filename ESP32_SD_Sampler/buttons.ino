@@ -3,7 +3,7 @@
 #define GPIO_BUTTONS 1
 #define TOTAL_BUTTONS 1
 #define LOGICAL_ON LOW
-const int buttonGPIOs[]{ 0 };
+const int buttonGPIOs[]{ BUTTON1_GPIO };
 
 bool autoFireEnabled = false;                 // should the buttons generate continious clicks when pressed longer than a longPressThreshold
 bool lateClickEnabled = false;                // enable registering click after a longPress call

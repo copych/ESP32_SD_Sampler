@@ -95,6 +95,7 @@ class Voice {
     uint8_t* WORD_ALIGNED_ATTR           _buffer1;                         // pointer to the 2nd allocated SD-reader buffer
     uint8_t* WORD_ALIGNED_ATTR           _playBuffer;                      // pointer to the buffer which is being played (one of the two toggling buffers)
     uint8_t* WORD_ALIGNED_ATTR           _fillBuffer;                      // pointer to the buffer which awaits filling (one of the two toggling buffers)
+    uint8_t             _buffersReady           = 0;  // counter
     uint32_t            _bufSizeBytes           = BUF_SIZE_BYTES;
     uint32_t            _read_buf_sectors       = READ_BUF_SECTORS;
     uint32_t            _bufSizeSmp             = 0;
@@ -104,7 +105,7 @@ class Voice {
     uint32_t            _bytesToPlay            = 0;
     int                 _playBufOffset          = 0;      // play-buffer byte offset till the 1st sample
     int                 _fillBufOffset          = 0;      // fill-buffer byte offset till the 1st sample
-    volatile int WORD_ALIGNED_ATTR       _pL1, _pL2, _pR1, _pR2  ;
+    int WORD_ALIGNED_ATTR       _pL1, _pL2, _pR1, _pR2  ;
     int                 _samplesInFillBuf       = 0;
     int                 _samplesInPlayBuf       = 0;
     volatile int WORD_ALIGNED_ATTR       _posSmp                 = 0;      // global position in terms of samples

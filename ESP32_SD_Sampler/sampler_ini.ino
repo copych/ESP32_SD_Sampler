@@ -163,7 +163,7 @@ float SamplerEngine::parseFloatValue( str256_t& val ) {
   val.trim();
   val.toUpperCase();
   float f = val.toFloat();
-  ESP_LOGI("","INI: float %f\r\n", f);
+  ESP_LOGI("","INI: float %f", f);
   return f;
 }
 
@@ -172,7 +172,7 @@ int SamplerEngine::parseIntValue( str256_t& val ) {
   val.trim();
   val.toUpperCase();
   int i = val.toInt();
-  ESP_LOGI("","INI: int %d\r\n", i);
+  ESP_LOGI("","INI: int %d", i);
   return i;
 }
 
@@ -192,7 +192,7 @@ variants_t SamplerEngine::parseVariants( str256_t& val ) {
     s1 = val.substring(j, k);
     s1.trim();
     vars.push_back(s1);
-    ESP_LOGI("","Adding %s\r\n" , s1.c_str());
+    ESP_LOGI("","Adding %s" , s1.c_str());
     if (k == val.length()) break;
     j = k + 1;
   }
@@ -211,12 +211,12 @@ void SamplerEngine::storeGroup( variants_t& vars ) {
   ESP_LOGI("",);
   for (int n = 0 ; n < i; n++) {
     a_note = midi_note[n];
- //   ESP_LOGI("","INI: Placing group: midi_note %d\r\n", a_note);
+ //   ESP_LOGI("","INI: Placing group: midi_note %d", a_note);
     for (int m = 0 ; m < ( ( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ); m++) {
       if (_groups[a_note][m] == 255) { // found an empty element
         for (int j = 0; j < i; j++) {
           if (midi_note[j] != a_note) {
- //           ESP_LOGI("","------- adding %d\r\n", midi_note[j]);
+ //           ESP_LOGI("","------- adding %d", midi_note[j]);
             _groups[a_note][m] = midi_note[j];
             m++;
           }
@@ -246,7 +246,7 @@ void SamplerEngine::parseLimits( str256_t& val) {
     s1.trim();
     lim2 = s1.toInt();
     for (int i = lim1; i <= lim2; i++) { _veloMap[i] = layer; }
-    ESP_LOGI("","Adding %s\r\n" , s1.c_str());
+    ESP_LOGI("","Adding %s" , s1.c_str());
     layer++;
     lim1 = lim2 + 1;
     if (k == val.length()) break;
@@ -276,12 +276,12 @@ void SamplerEngine::applyRange(ini_range_t& range) {
     _keyboard[i].sustain_level  = range.sustain_level;
     _keyboard[i].release_time   = range.release_time;
   }
-  ESP_LOGI("","INI: adding range for %s\r\n", range.instr.c_str());
+  ESP_LOGI("","INI: adding range for %s", range.instr.c_str());
 }
 
 
 bool SamplerEngine::parseFilenameTemplate(str256_t& line) {
-  ESP_LOGI("","Parse filename template:[[[%s]]]\r\n", line.c_str());
+  ESP_LOGI("","Parse filename template:[[[%s]]]", line.c_str());
   int a, b, i;
   str256_t str;
   template_item_t item;
@@ -293,7 +293,7 @@ bool SamplerEngine::parseFilenameTemplate(str256_t& line) {
     if (b < a) return false;
     if (a > i && b > a) {  // at the start of separator
       str = line.substring(i, a );
-      ESP_LOGI("","Parsing filename template: String separator: [%s]\r\n", str.c_str());
+      ESP_LOGI("","Parsing filename template: String separator: [%s]", str.c_str());
       item.item_type = P_SEPARATOR;
       item.item_str = str;
       _template.push_back(item);
@@ -301,7 +301,7 @@ bool SamplerEngine::parseFilenameTemplate(str256_t& line) {
     }
     if (a == i) { // at the start of token
       str = line.substring(a + 1, b );
-      ESP_LOGI("","Parsing filename template: Token: [%s]\r\n", str.c_str());
+      ESP_LOGI("","Parsing filename template: Token: [%s]", str.c_str());
       str = str.substring(0, 4);
       if (str ==  "NUMB" ) {
           item.item_type = P_NUMBER;
@@ -358,9 +358,9 @@ void SamplerEngine::processNameParser(entry_t* entry) {
   fname_t fname = entry->name;
   fname.toUpperCase();
   if (fname.endsWith(".WAV")) {
-    //ESP_LOGI("","Parsing name: <%s>\r\n", fname.c_str());
+    //ESP_LOGI("","Parsing name: <%s>", fname.c_str());
   } else {
-    ESP_LOGI("","Skipping name: <%s>\r\n", fname.c_str());
+    ESP_LOGI("","Skipping name: <%s>", fname.c_str());
     return;
   }
   for (auto tpl: _template) {
@@ -372,7 +372,7 @@ void SamplerEngine::processNameParser(entry_t* entry) {
             str8_t a = notes[j][k];
             len = a.length();
             str8_t b = fname.substring(pos, pos + len);
-          //  ESP_LOGI("","compare: <%s> <%s>\r\n", a.c_str() , b.c_str());
+          //  ESP_LOGI("","compare: <%s> <%s>", a.c_str() , b.c_str());
             if (a.equalsIgnoreCase(b) && len > match_weight) {
               match_weight = len;
               note_num = k;
@@ -383,9 +383,9 @@ void SamplerEngine::processNameParser(entry_t* entry) {
           pos += match_weight;
         }
         else {
-          ESP_LOGI("","Failed to determine note name in <%s>\r\n", fname.c_str());
+          ESP_LOGI("","Failed to determine note name in <%s>", fname.c_str());
         }
-      //  ESP_LOGI("","Note: %s\r\n", notes[0][note_num].c_str());
+      //  ESP_LOGI("","Note: %s", notes[0][note_num].c_str());
         break;
       case P_NUMBER:
         s = "";
@@ -394,7 +394,7 @@ void SamplerEngine::processNameParser(entry_t* entry) {
             s += fname.charAt(pos);
             pos++;
           } else {
-//            ESP_LOGI("","Number: %s\r\n", s.c_str());
+//            ESP_LOGI("","Number: %s", s.c_str());
             break;
           }
         }
@@ -409,7 +409,7 @@ void SamplerEngine::processNameParser(entry_t* entry) {
             break;
           }
         }
-        //ESP_LOGI("","Midi Note Number: %s\r\n", s.c_str());
+        //ESP_LOGI("","Midi Note Number: %s", s.c_str());
         if (s>"") midi_note_num = s.toInt();
         break;
       case P_INSTRUMENT: {
@@ -419,7 +419,7 @@ void SamplerEngine::processNameParser(entry_t* entry) {
           for (auto rng: _ranges) { // first pass: find max match_weight
             len = rng.instr.length();
             instr = fname.substring(pos, pos + len);
-            // ESP_LOGI("","INI: TEST instr: [%s] \r\n", instr.c_str());
+            // ESP_LOGI("","INI: TEST instr: [%s] ", instr.c_str());
             if (len>match_weight && instr.equalsIgnoreCase(rng.instr)) {
               match_weight = len;
             }
@@ -433,7 +433,7 @@ void SamplerEngine::processNameParser(entry_t* entry) {
               if (instr.equalsIgnoreCase(rng.instr)) {
                 // range matches by instrument
                 rng_i.push_back(i);
-                 ESP_LOGI("","INI: Matched instr: %s, %d \r\n", instr.c_str(), i);
+                 ESP_LOGI("","INI: Matched instr: %s, %d ", instr.c_str(), i);
               }
             }
             i++;
@@ -441,13 +441,13 @@ void SamplerEngine::processNameParser(entry_t* entry) {
           if (match_weight>0) {
             pos += match_weight;
           } else {
-            ESP_LOGI("","INI: Couldn't match instrument name [%s] in %s\r\n", instr.c_str(), fname.c_str());    
+            ESP_LOGI("","INI: Couldn't match instrument name [%s] in %s", instr.c_str(), fname.c_str());    
           }
         }
       case P_OCTAVE:
         s = fname.substring(pos, pos+1);
         oct = s.toInt();
-//        ESP_LOGI("","Octave: %d\r\n" , oct);
+//        ESP_LOGI("","Octave: %d" , oct);
         pos++;
         break;
       case P_VELO:
@@ -463,13 +463,13 @@ void SamplerEngine::processNameParser(entry_t* entry) {
           }
           i++;
         }
-        // ESP_LOGI("","Velocity: %d\r\n", velo);
+        // ESP_LOGI("","Velocity: %d", velo);
         pos += match_weight;
         break;
       case P_SEPARATOR:
         s = tpl.item_str;
         len = s.length();
-        // ESP_LOGI("","Skipping separator %s\r\n", s.c_str());
+        // ESP_LOGI("","Skipping separator %s", s.c_str());
         pos += len;
         break;
       default:
@@ -654,7 +654,7 @@ uint8_t SamplerEngine::midiNoteByName(str8_t noteNameOct) {
     }
   }
   str8_t b = noteNameOct.substring(match_weight, match_weight+2);
- // ESP_LOGI("","INI: midiNoteByName string: [%s] note: [%d] oct: [%s] \r\n", noteNameOct.c_str(), note_num, b.c_str());
+ // ESP_LOGI("","INI: midiNoteByName string: [%s] note: [%d] oct: [%s] ", noteNameOct.c_str(), note_num, b.c_str());
   oct = b.toInt();
   if (oct>-2) {
     note_num+=(oct+1)*12;

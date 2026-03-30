@@ -1,80 +1,57 @@
-#include "esp_err.h"
+#include "esp_err.h"  
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "driver/sdmmc_host.h"
+#include "driver/sdmmc_defs.h"
 #include "sdmmc_cmd.h"
 
 
 // utility functions for other files to import
 esp_err_t SDMMC_FAT32::write_block(const void *source, uint32_t block, uint32_t size)
 {
-  #ifdef USE_MUTEX
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  #endif
   ret = sdmmc_write_sectors(&card, (const void *)source, (uint32_t)block, (uint32_t)size);
-  #ifdef USE_MUTEX
-	xSemaphoreGive(mutex);
-  #endif
   return(ret);
 }
 
 esp_err_t SDMMC_FAT32::read_block(void *dst, uint32_t start_sector, uint32_t sector_count)
 {
-  #ifdef USE_MUTEX
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  #endif
   ret = sdmmc_read_sectors(&card, (void *)dst, (uint32_t)start_sector, (uint32_t)sector_count);
-  #ifdef USE_MUTEX
-	xSemaphoreGive(mutex);
-  #endif
   return(ret);
-
 }
 
 esp_err_t SDMMC_FAT32::read_sector( uint32_t sector )
 {
-  #ifdef USE_MUTEX
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  #endif
   ret = sdmmc_read_sectors(&card, (void *)sector_buf, (uint32_t)sector, 1UL );
   _sectorInBuf = sector;
-  #ifdef USE_MUTEX
-	xSemaphoreGive(mutex);
-  #endif
   return(ret);
 }
 
 esp_err_t SDMMC_FAT32::cache_fat( uint32_t sector )
 {
-  #ifdef USE_MUTEX
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  #endif
   ret = sdmmc_read_sectors(&card, (void *)(fat_cache.uint8), (uint32_t)sector, FAT_CACHE_SECTORS );
   _firstCachedFatSector = sector;
   _lastCachedFatSector = sector + FAT_CACHE_SECTORS - 1;
-  #ifdef USE_MUTEX
-	xSemaphoreGive(mutex);
-  #endif
   return(ret);
 }
 
 esp_err_t SDMMC_FAT32::cache_dir( uint32_t sector )
 {
-  #ifdef USE_MUTEX
-  xSemaphoreTake(mutex, portMAX_DELAY);
-  #endif
+
   ret = sdmmc_read_sectors(&card, (void *)(dir_cache), (uint32_t)sector, DIR_CACHE_SECTORS );
   _firstCachedDirSector = sector;
   _lastCachedDirSector = sector + DIR_CACHE_SECTORS - 1;
-  #ifdef USE_MUTEX
-	xSemaphoreGive(mutex);
-  #endif
+
   return(ret);
 }
 
 // tool to test hardware with different buffer sizes
 void SDMMC_FAT32::testReadSpeed(uint32_t sectorsPerRead, uint32_t totalMB){
   uint32_t readCount = totalMB * 1024 * 1024 / BYTES_PER_SECTOR / sectorsPerRead;
-  //auto rcv = static_cast<uint8_t*>(malloc(BYTES_PER_SECTOR*READ_BUF_SECTORS*sizeof(uint8_t)));
-  uint8_t rcv[BYTES_PER_SECTOR*READ_BUF_SECTORS]; 
+  // auto rcv = static_cast<uint8_t*>(malloc(BYTES_PER_SECTOR*READ_BUF_SECTORS*sizeof(uint8_t)));
+    uint8_t * rcv = (uint8_t*)heap_caps_malloc(
+        BYTES_PER_SECTOR*READ_BUF_SECTORS,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+    );
+//  uint8_t rcv[BYTES_PER_SECTOR*READ_BUF_SECTORS]; 
   pinMode(18,INPUT);
   randomSeed(analogRead(18));
   volatile size_t ms1, ms2;
@@ -85,86 +62,96 @@ void SDMMC_FAT32::testReadSpeed(uint32_t sectorsPerRead, uint32_t totalMB){
   }
   ms2 = micros(); 
   float MBytesPerS = (float)totalMB * 1000.0 * 1000.0 / (float)(ms2-ms1);
-  ESP_LOGI("","Reading %d MBytes\r\n", totalMB);
-  ESP_LOGI("","Reading block size: %d Bytes\r\n", sectorsPerRead * BYTES_PER_SECTOR);
-  ESP_LOGI("","Time spent: %d ms\r\n" , (ms2-ms1)/1000);
-  ESP_LOGI("","Read speed: %3.2f MB/s\r\n\r\n" , MBytesPerS);
+  ESP_LOGI("","Reading %d MBytes", totalMB);
+  ESP_LOGI("","Reading block size: %d Bytes", sectorsPerRead * BYTES_PER_SECTOR);
+  ESP_LOGI("","Time spent: %d ms" , (ms2-ms1)/1000);
+  ESP_LOGI("","Read speed: %3.2f MB/s" , MBytesPerS);
+  ESP_LOGI("","Estimated polyphony: %d stereo samples\r\n" , (int)(2.95f * MBytesPerS));
 }
-    
+
+
 void SDMMC_FAT32::begin(void)
 {
-#ifdef USE_MUTEX
-  mutex = xSemaphoreCreateMutex();
-#endif
-  sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-  host.flags = SDMMC_HOST_FLAG_4BIT;
-  host.flags &= ~SDMMC_HOST_FLAG_DDR;       // DDR mode OFF
-  // host.flags |= SDMMC_HOST_FLAG_DDR;          // DDR mode ON
-  // host.max_freq_khz = SDMMC_FREQ_52M;
-  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
-#if defined SDMMC_D0
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_0;
+    
+//    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED; // 40MHz
+  //  host.max_freq_khz = SDMMC_FREQ_52M; // 52MHz
+  //  host.max_freq_khz = SDMMC_FREQ_SDR50; // 100MHz 
+    host.max_freq_khz = 60000;
 
-  gpio_pulldown_dis((gpio_num_t)SDMMC_D0);
-  gpio_pulldown_dis((gpio_num_t)SDMMC_D1);
-  gpio_pulldown_dis((gpio_num_t)SDMMC_D2); 
-  gpio_pulldown_dis((gpio_num_t)SDMMC_D3);
-  gpio_pulldown_dis((gpio_num_t)SDMMC_CLK);
-  gpio_pulldown_dis((gpio_num_t)SDMMC_CMD);
-  gpio_pullup_en((gpio_num_t)SDMMC_D0);
-  gpio_pullup_en((gpio_num_t)SDMMC_D1);
-  gpio_pullup_en((gpio_num_t)SDMMC_D3);
-  gpio_pullup_en((gpio_num_t)SDMMC_CLK);
-  gpio_pullup_en((gpio_num_t)SDMMC_CMD);
- #if defined(CONFIG_IDF_TARGET_ESP32S3)
-  gpio_pullup_en((gpio_num_t)SDMMC_D2); // formally this is required, nevertheless GPIO12 of ESP32 set HIGH in some cases leads to a bootloop or a bootstop, so it's up to you if you want it for ESP32
-  slot_config.clk = (gpio_num_t)SDMMC_CLK;
-  slot_config.cmd = (gpio_num_t)SDMMC_CMD;
-  slot_config.d0  = (gpio_num_t)SDMMC_D0;
-  slot_config.d1  = (gpio_num_t)SDMMC_D1;
-  slot_config.d2  = (gpio_num_t)SDMMC_D2;
-  slot_config.d3  = (gpio_num_t)SDMMC_D3;
- #endif
+  //  host.flags &= ~SDMMC_HOST_FLAG_DDR;
+
+
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+
+#if defined CONFIG_IDF_TARGET_ESP32S3 || defined CONFIG_IDF_TARGET_ESP32P4
+    gpio_pulldown_dis((gpio_num_t)SDMMC_D0);
+    gpio_pulldown_dis((gpio_num_t)SDMMC_D1);
+    gpio_pulldown_dis((gpio_num_t)SDMMC_D2); 
+    gpio_pulldown_dis((gpio_num_t)SDMMC_D3);
+    gpio_pulldown_dis((gpio_num_t)SDMMC_CLK);
+    gpio_pulldown_dis((gpio_num_t)SDMMC_CMD);
+    gpio_pullup_en((gpio_num_t)SDMMC_D0);
+    gpio_pullup_en((gpio_num_t)SDMMC_D1);
+    gpio_pullup_en((gpio_num_t)SDMMC_D3);
+    gpio_pullup_en((gpio_num_t)SDMMC_CLK);
+    gpio_pullup_en((gpio_num_t)SDMMC_CMD);
+    gpio_pullup_en((gpio_num_t)SDMMC_D2); 
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 #endif
-  
-   
-  slot_config.width = 4;
-  ret = sdmmc_host_init();
-  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_host_init : %s\r\n", esp_err_to_name(ret));  }
-  ret = sdmmc_host_set_bus_ddr_mode(SDMMC_HOST_SLOT_1, false);
-  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_host_set_bus_ddr_mode : %s\r\n", esp_err_to_name(ret));   }
-  ret = sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config);
-  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_host_init_slot : %s\r\n", esp_err_to_name(ret));  }
-  ret = sdmmc_card_init(&host, &card);  
-  if(ret != ESP_OK) {    ESP_LOGI("", "sdmmc_card_init : %s\r\n", esp_err_to_name(ret));  }
-  sdmmc_card_print_info(stdout, &card);
-  uint32_t width = sdmmc_host_get_slot_width(SDMMC_HOST_SLOT_1);
-  ESP_LOGI("", "Bus width: %d\r\n", width);
+    slot.width = 4;
+    slot.clk = (gpio_num_t)SDMMC_CLK;
+    slot.cmd = (gpio_num_t)SDMMC_CMD;
+    slot.d0  = (gpio_num_t)SDMMC_D0;
+    slot.d1  = (gpio_num_t)SDMMC_D1;
+    slot.d2  = (gpio_num_t)SDMMC_D2;
+    slot.d3  = (gpio_num_t)SDMMC_D3;
+
+
+
+    sd_pwr_ctrl_ldo_config_t ldo_config;
+#if defined CONFIG_IDF_TARGET_ESP32P4
+    #ifndef BOARD_SDMMC_POWER_CHANNEL
+      #define BOARD_SDMMC_POWER_CHANNEL 4 // GPIO45 of ESP32P4
+    #endif
+    ldo_config.ldo_chan_id = BOARD_SDMMC_POWER_CHANNEL;
+    sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
+    sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
+    sd_pwr_ctrl_set_io_voltage(pwr_ctrl_handle, 3300); // 3v3
+#endif
+
+
+
+    ESP_ERROR_CHECK(sdmmc_host_init());
+    ESP_ERROR_CHECK(sdmmc_host_init_slot(host.slot, &slot));
+    
+    esp_err_t ret = sdmmc_card_init(&host, &card);
+    if (ret != ESP_OK) {
+        ESP_LOGE("SD", "sdmmc_card_init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+  uint32_t width = sdmmc_host_get_slot_width(host.slot);
+  ESP_LOGI("", "Bus width: %d", width);
   ret = get_mbr();
-  if(ret != ESP_OK) {    ESP_LOGI("", "get_mbr : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "get_mbr : %s", esp_err_to_name(ret));  }
   ret = get_bpb();
-  if(ret != ESP_OK) {    ESP_LOGI("", "get_bpb : %s\r\n", esp_err_to_name(ret));  }
+  if(ret != ESP_OK) {    ESP_LOGI("", "get_bpb : %s", esp_err_to_name(ret));  }
+  int real_freq_khz = 0;
+  ret = sdmmc_host_get_real_freq(host.slot, &real_freq_khz);
+  ESP_LOGI("", "real SD freq : %d kHz\r\n", real_freq_khz); 
 
+  sdmmc_card_print_info(stdout, &card);
 
-/*
- * 
- *  sdmmc_host_set_cclk_always_on(int slot, bool cclk_always_on);
- *  sdmmc_host_set_bus_width(int slot, size_t width);
- *  sdmmc_host_set_card_clk(int slot, uint32_t freq_khz);
- *  sdmmc_host_set_bus_ddr_mode(int slot, bool ddr_enabled);
- *  sdmmc_host_get_real_freq(int slot, int *real_freq_khz);
- *  sdmmc_host_set_input_delay(int slot, sdmmc_delay_phase_t delay_phase);
- *  
- *  SDMMC_SLOT_FLAG_INTERNAL_PULLUP macro
- *  
- */
-  
 }
+
+
 
 void SDMMC_FAT32::end() {
   ret = sdmmc_host_deinit() ;
   if(ret != ESP_OK){
-    ESP_LOGI("", "sdmmc_host_deinit : %s\r\n", esp_err_to_name(ret));
+    ESP_LOGI("", "sdmmc_host_deinit : %s", esp_err_to_name(ret));
   }
 }
 
@@ -174,13 +161,13 @@ esp_err_t SDMMC_FAT32::get_mbr() {
     for (int i = 0; i < 4; i++) {
       if (mbrStruct.partitionData[i].fsType == 11  ||  mbrStruct.partitionData[i].fsType == 12) { 
         _firstSector  = mbrStruct.partitionData[i].firstSector;
-        ESP_LOGI("","_firstSector %d\r\n", _firstSector);
+        ESP_LOGI("","_firstSector %d", _firstSector);
         _fsType       = mbrStruct.partitionData[i].fsType;
-        ESP_LOGI("","_fsType %d\r\n", _fsType);
+        ESP_LOGI("","_fsType %d", _fsType);
         _partitionId = i ;        
         _sectorsTotal  = mbrStruct.partitionData[i].sectorsTotal;
-        ESP_LOGI("","_sectorsTotal %d\r\n", _sectorsTotal);
-        ESP_LOGI("","Partition size = %d MB\r\n" , _sectorsTotal / 1024 / 1024 * BYTES_PER_SECTOR );
+        ESP_LOGI("","_sectorsTotal %d", _sectorsTotal);
+        ESP_LOGI("","Partition size = %d MB" , _sectorsTotal / 1024 / 1024 * BYTES_PER_SECTOR );
         ESP_LOGI("",">>>Reading MBR done");
         ret = ESP_OK;
         break;
@@ -196,21 +183,22 @@ esp_err_t SDMMC_FAT32::get_bpb() {
   ret = read_block(&bpbStruct, mbrStruct.partitionData[0].firstSector, 1);
   if (ret == ESP_OK) {
     _sectorsPerFat      = bpbStruct.sectorsPerFat;
-    ESP_LOGI("","_sectorsPerFat %d\r\n", _sectorsPerFat);
+    ESP_LOGI("","_sectorsPerFat %d ", _sectorsPerFat);
     _bytesPerSector     = bpbStruct.bytesPerSector;
-    ESP_LOGI("","_bytesPerSector %d\r\n", _bytesPerSector);
+    ESP_LOGI("","_bytesPerSector %d ", _bytesPerSector);
     _numFats            = bpbStruct.numberofFATs;
-    ESP_LOGI("","_numFats %d\r\n", _numFats);
+    ESP_LOGI("","_numFats %d ", _numFats);
     _reservedSectors    = bpbStruct.reservedSectorCount;
-    ESP_LOGI("","_reservedSectors %d\r\n", _reservedSectors);    
+    ESP_LOGI("","_reservedSectors %d", _reservedSectors);    
     _rootCluster    = bpbStruct.rootCluster;
-    ESP_LOGI("","_rootCluster %d\r\n", _rootCluster);
+    ESP_LOGI("","_rootCluster %d", _rootCluster);
     _firstDataSector    = _sectorsPerFat * _numFats + _reservedSectors ;
-    ESP_LOGI("","_firstDataSector %d\r\n", _firstDataSector);
+    ESP_LOGI("","_firstDataSector %d", _firstDataSector);
     _sectorsPerCluster  = bpbStruct.sectorPerCluster;
-    ESP_LOGI("","_sectorsPerCluster %d\r\n", _sectorsPerCluster);
+    if (_sectorsPerCluster <= 0) _sectorsPerCluster = 1; // to avoid divisioin by zero
+    ESP_LOGI("","_sectorsPerCluster %d", _sectorsPerCluster);
     _bytesPerCluster  = _sectorsPerCluster * _bytesPerSector ;
-    ESP_LOGI("","_bytesPerCluster %d\r\n", _bytesPerCluster);
+    ESP_LOGI("","_bytesPerCluster %d", _bytesPerCluster);
     ESP_LOGI("",">>>Reading BPB done.");
   } else {
     ESP_LOGI("","SDMMC: ERROR reading partition data");
@@ -258,13 +246,13 @@ entry_t* SDMMC_FAT32::findEntry(const fpath_t& search_path) {
   name = search_path;
   name.toUpperCase();
   name.replace("\\",""); 
-  ESP_LOGI("","Searching in <%s> for [%s] entry:\r\n", _currentDir.c_str(), search_path.c_str());
+  ESP_LOGI("","Searching in <%s> for [%s] entry:", _currentDir.c_str(), search_path.c_str());
   rewindDir();
   entry = nextEntry();
   while (!entry->is_end) {
     testname = entry->name;
     testname.toUpperCase();
-    //ESP_LOGI("","compare <%s> <%s>\r\n", name.c_str(), testname.c_str());
+    //ESP_LOGI("","compare <%s> <%s>", name.c_str(), testname.c_str());
     if (testname == name) {
       return entry;
       break;
@@ -285,13 +273,13 @@ uint32_t SDMMC_FAT32::findEntryCluster(const fpath_t& search_path) {
   name = search_path;
   name.toUpperCase();
   name.replace("\\",""); 
-  ESP_LOGI("","Searching in <%s> for [%s] entry cluster:\r\n", _currentDir.c_str(), search_path.c_str());
+  ESP_LOGI("","Searching in <%s> for [%s] entry cluster: ", _currentDir.c_str(), search_path.c_str());
   rewindDir();
   entry = nextEntry();
   while (!entry->is_end) {
     testname = entry->name;
     testname.toUpperCase();
-    //ESP_LOGI("","compare <%s> <%s>\r\n", name.c_str(), testname.c_str());
+    //ESP_LOGI("","compare <%s> <%s>", name.c_str(), testname.c_str());
     if (testname == name) {
       first_cluster = clusterBySector(entry->sectors[0].first);
       break;
@@ -352,7 +340,7 @@ void SDMMC_FAT32::setCurrentDir(fpath_t dir_path){
   _currentCluster   = _startCluster;
   _startSector      = firstSectorOfCluster(_startCluster);
   _currentSector    = _startSector;
-  ESP_LOGI("","SDMMC: Current ROOT set to <%s>\r\n", _currentDir.c_str() );
+  ESP_LOGI("","SDMMC: Current ROOT set to <%s>", _currentDir.c_str() );
 }
 
 
@@ -402,7 +390,7 @@ entry_t* SDMMC_FAT32::nextEntry() {
   while (!(ent->is_end)) {
     if (ent->is_dir>=0)
     {
-  //    ESP_LOGI("","inside nextEntry() %s %d\r\n", ent->name.c_str(), ent->sectors[0].first); 
+  //    ESP_LOGI("","inside nextEntry() %s %d", ent->name.c_str(), ent->sectors[0].first); 
       return ent;
     }
     ent = buildNextEntry();
@@ -477,12 +465,12 @@ entry_t* SDMMC_FAT32::buildNextEntry() {
         continue; // skip deleted, empty, system and hidden, sysvol
       }
       shortname = to_8dot3(rec_array[_dirent_num].filename);
-//      ESP_LOGI("",">>>\tShort name = <%s>\r\n", shortname.c_str());
+//      ESP_LOGI("",">>>\tShort name = <%s>", shortname.c_str());
       
     }
     if (entry_done) {
       filename = unicode2ascii(reinterpret_cast<uint16_t*>(&fname), MAX_NAME_LEN)  ;
-//      ESP_LOGI("",">>>\tLong name = <%s>\r\n\r\n", filename.c_str());
+//      ESP_LOGI("",">>>\tLong name = <%s>", filename.c_str());
       if (shortname>"" && filename == "") filename = shortname;
       if (filename.endsWith(".")) filename.remove(filename.length()-1,1);
       _currentEntry.name = filename;
@@ -524,7 +512,7 @@ entry_t* SDMMC_FAT32::buildNextEntry() {
 }
 
 void SDMMC_FAT32::printCurrentDir() {
-  ESP_LOGI("","Directory <%s>:\r\n", _currentDir.c_str());
+  ESP_LOGI("","Directory <%s>:", _currentDir.c_str());
   const char cdir[] = {"<DIR>"};
   const char cfile[] = {""};
   rewindDir();
@@ -533,9 +521,9 @@ void SDMMC_FAT32::printCurrentDir() {
   ent = nextEntry();
   while (!(ent->is_end)) {
     if (ent->size >= 10240) {
-      ESP_LOGI("","%d:\t%s\t%s\t%d kB\r\n", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size/1024);
+      ESP_LOGI("","%d:\t%s\t%s\t%d kB", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size/1024);
     } else {
-      ESP_LOGI("","%d:\t%s\t%s\t%d Bytes\r\n", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size);
+      ESP_LOGI("","%d:\t%s\t%s\t%d Bytes", i, ent->is_dir ? cdir : cfile, ent->name.c_str(), ent->size);
     }
     ent = nextEntry();
     i++;

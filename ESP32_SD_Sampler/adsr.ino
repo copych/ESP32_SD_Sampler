@@ -18,7 +18,7 @@ void Adsr::init(float sample_rate, int blockSize) {
     setTime(ADSR_SEG_ATTACK, 0.0f);
     setTime(ADSR_SEG_DECAY, 0.0f);
     setTime(ADSR_SEG_RELEASE, 0.05f);
-    setTime(ADSR_SEG_FAST_RELEASE, 0.0005f); // a few samples fade, trying to avoid clicks on polyphony overrun
+    setTime(ADSR_SEG_FAST_RELEASE, 0.0003f); // a few samples fade, trying to avoid clicks on polyphony overrun
     setTime(ADSR_SEG_SEMI_FAST_RELEASE, 0.02f); // for exclusive note groups voice stealing
 }
 
@@ -28,6 +28,10 @@ void Adsr::retrigger(eEnd_t hardness) {
   mode_ = ADSR_SEG_ATTACK;
   switch (hardness) {
     case END_NOW:
+    
+      if (x_ > 0.01f) {
+        ESP_LOGI("RETRIGGER", "END NOW, x=%0.5f", x_);
+      }
       x_ = 0.0f;
       D0_ = attackD0_;
       break;
@@ -47,6 +51,9 @@ void Adsr::end(eEnd_t hardness) {
     case END_NOW:{
       mode_ = ADSR_SEG_IDLE;
       D0_ = attackD0_;
+      if (x_ > 0.1f) {
+        ESP_LOGI("END", "END NOW, x=%0.5f", x_);
+      }
       x_ = 0.f;
       break;
     }

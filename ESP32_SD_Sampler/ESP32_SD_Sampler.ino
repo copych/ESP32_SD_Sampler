@@ -1,6 +1,6 @@
  /*
 * ESP32-S3 SD Sampler is a polyphonic music synthesizer, which can play PCM WAV samples directly from an SD (microSD) 
-* card connected to an ESP32-S3. Simple: one directory = one sample set. Plain text "sampler.ini" manages how samples 
+* card connected to an ESP32-S3 or ESP32-P4. One directory = one sample set. Plain text "sampler.ini" manages how samples 
 * to be spread over the keyboard. The main difference, comparing to the projects available on the net, is that this 
 * sampler WON'T try to preload all the stuff into the RAM/PSRAM to play it on demand. So it's not limited in this way 
 * by the size of the memory chip and can take really huge (per-note true sampled multi-velocity several gigabytes) 
@@ -20,7 +20,9 @@
 * More info:
 * https://github.com/copych/ESP32_S3_Sampler
 */
-#pragma GCC optimize ("Os")
+
+#pragma packed(64)
+#pragma GCC optimize ("O2")
 
 #include <Arduino.h>
 #include "config.h"
@@ -37,7 +39,6 @@
   CRGB leds[1];
 #endif
 
-//SET_LOOP_TASK_STACK_SIZE(READ_BUF_SECTORS * BYTES_PER_SECTOR + 20000);
 //SET_LOOP_TASK_STACK_SIZE(80000);
 
 // =============================================================== MIDI interfaces ===============================================================
@@ -95,8 +96,9 @@ static  void IRAM_ATTR sampler_generate_buf();
 
 // =============================================================== PER CORE TASKS ===============================================================
 static void IRAM_ATTR audio_task(void *userData) { // core 0 task
+  vTaskDelay(10);
   ESP_LOGI("","core 0 audio task run");
-  vTaskDelay(110);
+  vTaskDelay(20);
   volatile uint32_t WORD_ALIGNED_ATTR t1,t2,t3,t4;
   
   while (true) {
@@ -120,7 +122,7 @@ static void IRAM_ATTR audio_task(void *userData) { // core 0 task
     
 #ifdef DEBUG_CORE_TIME 
     t4=micros();
-    ESP_LOGI("","gen=%d, mix=%d, output=%d, total=%d\r\n", t2-t1, t3-t2, t4-t3, t4-t1);
+    ESP_LOGI("","gen=%d, mix=%d, output=%d, total=%d", t2-t1, t3-t2, t4-t3, t4-t1);
 #endif
 
   }
@@ -128,8 +130,9 @@ static void IRAM_ATTR audio_task(void *userData) { // core 0 task
  
 static void  IRAM_ATTR control_task(void *userData) { // core 1 task
   byte hue=0;
+  vTaskDelay(20);
   ESP_LOGI("","core 1 control task run");
-  vTaskDelay(110);
+  vTaskDelay(20);
   uint32_t WORD_ALIGNED_ATTR passby = 0;
 
   while (true) { 
@@ -163,9 +166,9 @@ static void  IRAM_ATTR control_task(void *userData) { // core 1 task
       FastLED.show(1);
       #endif
       
-    //  ESP_LOGI("","Active voices %d of %d \r\n", Sampler.getActiveVoices(), MAX_POLYPHONY);
-    //  ESP_LOGI("","ControlTask unused stack size = %d bytes\r\n", uxTaskGetStackHighWaterMark(ControlTask));
-    //  ESP_LOGI("","SynthTask unused stack size = %d bytes\r\n", uxTaskGetStackHighWaterMark(SynthTask));
+    //  ESP_LOGI("","Active voices %d of %d ", Sampler.getActiveVoices(), MAX_POLYPHONY);
+    //  ESP_LOGI("","ControlTask unused stack size = %d bytes", uxTaskGetStackHighWaterMark(ControlTask));
+    //  ESP_LOGI("","SynthTask unused stack size = %d bytes", uxTaskGetStackHighWaterMark(SynthTask));
     }
   }
 }
@@ -177,32 +180,35 @@ void setup() {
   DEBUG_PORT.begin(115200);
 #endif
 
+
 #ifdef RGB_LED
   FastLED.addLeds<WS2812, RGB_LED, RGB>(leds, 1);
   FastLED.setBrightness(1);
   leds[0].setHue(HUE_RED); //green
   FastLED.show(1);
 #endif
+delay(2500);
 
 ESP_LOGI("","MIDI: INIT");
   MidiInit();
-
-delay(800);
 
 #ifdef RGB_LED
   leds[0].setHue(HUE_PURPLE); //green
   FastLED.show(1);
 #endif
 
-ESP_LOGI("","I2S: INIT");
-  i2sInit();
+
 
 ESP_LOGI("","CARD: BEGIN");
   Card.begin();
-  
-//delay(1000);
- // Card.testReadSpeed(READ_BUF_SECTORS,8);
-  
+
+//Card.testReadSpeed(READ_BUF_SECTORS,2);
+
+delay(100);
+
+ESP_LOGI("","I2S: INIT");
+  i2sInit();
+
 ESP_LOGI("","REVERB: INIT");
   Reverb.Init();
  
@@ -218,15 +224,14 @@ ESP_LOGI("","SAMPLER: INIT");
   
   Sampler.setCurrentFolder(1);
 
-  
   initButtons();
   
-  xTaskCreatePinnedToCore( audio_task, "SynthTask", 4000, NULL, 24, &SynthTask, 0 );
+  xTaskCreatePinnedToCore( audio_task, "SynthTask", 4000, NULL, 8, &SynthTask, 0 );
+  xTaskCreatePinnedToCore( control_task, "ControlTask", 9000, NULL, 5, &ControlTask, 1 );
  
-  xTaskCreatePinnedToCore( control_task, "ControlTask", 9000, NULL, 23, &ControlTask, 1 );
-
-  
   c_major();
+
+  vTaskDelay(100);
 
   ESP_LOGI("","Setup() DONE");
  // heap_caps_print_heap_info(MALLOC_CAP_8BIT );
@@ -240,9 +245,15 @@ ESP_LOGI("","SAMPLER: INIT");
 
 void loop() {
   char res[800];
+  
+  vTaskDelay(25);
   vTaskList(res) ;
   ESP_LOGI("", "%s\n\n", res);
+
   heap_caps_print_heap_info( MALLOC_CAP_INTERNAL );
+            
+
+  vTaskDelay(30);
 
   ESP_LOGI("","LOOP: killing task");
   taskYIELD();

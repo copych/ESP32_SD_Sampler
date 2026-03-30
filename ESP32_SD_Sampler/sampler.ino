@@ -9,7 +9,7 @@ void SamplerEngine::init(SDMMC_FAT32* Card){
   _maxVoices = MAX_POLYPHONY;
   int num_sets = scanRootFolder();
   for (int i = 0; i < num_sets; i++) {
-    ESP_LOGI("","Folder %d : %s\r\n" , i ,_folders[i].c_str());
+    ESP_LOGI("","Folder %d : %s" , i ,_folders[i].c_str());
   }
   ESP_LOGI("","Total %d folders with samples found\r\n", num_sets);
   initKeyboard();
@@ -38,7 +38,7 @@ void SamplerEngine::init(SDMMC_FAT32* Card){
 
 int SamplerEngine::scanRootFolder() {  
   fpath_t dirname;
-  ESP_LOGI("","SAMPLER: Scanning root folder");
+  ESP_LOGI("","\r\nSAMPLER: Scanning root folder");
   SDMMC_FileReader Reader(_Card);
   _rootFolder = ROOT_FOLDER;
   _folders.clear();
@@ -68,7 +68,6 @@ inline int SamplerEngine::assignVoice(byte midi_note, byte velo){
   float maxVictimScore = 0.0;
   float minAmp = 1.0e30;
   int id = 0;
-  
   for (int i = 0 ; i < _maxVoices ; i++) {
     if (!Voices[i].isActive()){
    //   ESP_LOGI("","SAMPLER: First vacant voice");
@@ -89,13 +88,13 @@ inline int SamplerEngine::assignVoice(byte midi_note, byte velo){
 inline void SamplerEngine::noteOn(uint8_t midiNote, uint8_t velo){
   int i = assignVoice(midiNote, velo);
   sample_t smp = _sampleMap[midiNote][mapVelo(velo)];
-  for (int n = 0; n < ( ( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ); n++ ) {
+  for (int n = 0; n < (( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ); n++ ) {
     if (_groups[midiNote][n] == 255) break;    // terminate
-    ESP_LOGI("","SAMPLER: GROUP KILL: %d\r\n", _groups[midiNote][n]);
+    ESP_LOGI("","SAMPLER: GROUP KILL: %d", _groups[midiNote][n]);
     noteOff(_groups[midiNote][n], Adsr::END_SEMI_FAST);      // provide exclusivity
   }
   if (smp.channels > 0) {
-   // ESP_LOGI("","SAMPLER: voice %d note %d velo %d\r\n", i, midiNote, velo);
+   // ESP_LOGI("","SAMPLER: voice %d note %d velo %d", i, midiNote, velo);
     Voices[i].setStarted(false);
     Voices[i].setAttackTime(_keyboard[midiNote].attack_time);
     Voices[i].setDecayTime(_keyboard[midiNote].decay_time);
@@ -112,7 +111,7 @@ inline void SamplerEngine::noteOff(uint8_t midiNote, Adsr::eEnd_t end_type ){
   if (_keyboard[midiNote].noteoff || end_type!= Adsr::END_REGULAR) {
     for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
       if (Voices[i].getMidiNote() == midiNote && Voices[i].isActive()) {      
-        // ESP_LOGI("","SAMPLER: NOTE OFF Voice %d note %d \r\n", i, midiNote);
+        // ESP_LOGI("","SAMPLER: NOTE OFF Voice %d note %d ", i, midiNote);
         Voices[i].setPressed(false);
         Voices[i].end(end_type);
       }
@@ -123,7 +122,7 @@ inline void SamplerEngine::noteOff(uint8_t midiNote, Adsr::eEnd_t end_type ){
 
 inline void SamplerEngine::setSustain(bool onoff) {
   _sustain = onoff; 
-  // ESP_LOGI("","SAMPLER: sustain: %d\r\n", onoff);
+  // ESP_LOGI("","SAMPLER: sustain: %d", onoff);
   if (!onoff) {
     for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
       if (_keyboard[Voices[i].getMidiNote()].noteoff && Voices[i].isActive() ) {
@@ -215,7 +214,7 @@ void IRAM_ATTR SamplerEngine::fillBuffer() {
     }
   }
   Voices[iToFeed].feed(); 
-  // ESP_LOGI("","SAMPLER: Fed voice id=%d hunger=%d\r\n", iToFeed, hunger);
+  // ESP_LOGI("","SAMPLER: Fed voice id=%d hunger=%d", iToFeed, hunger);
 }
 
 
@@ -264,7 +263,7 @@ void SamplerEngine::initKeyboard() {
     _keyboard[i].noteoff      = true;
     //_keyboard[i].velo_layer   = 1;
     _keyboard[i].tuning       = 1.0f;
-    // ESP_LOGI("","%d:\t%s\t%s\t%d\t%7.3f\r\n", i, _keyboard[i].name[0].c_str(), _keyboard[i].name[1].c_str(), _keyboard[i].octave, _keyboard[i].freq);
+    // ESP_LOGI("","%d:\t%s\t%s\t%d\t%7.3f", i, _keyboard[i].name[0].c_str(), _keyboard[i].name[1].c_str(), _keyboard[i].octave, _keyboard[i].freq);
   }
 }
 
@@ -345,7 +344,7 @@ void SamplerEngine::freeSomeVoices() {
           }
         }
         Voices[id].end(Adsr::END_FAST);
-        //ESP_LOGI("","SAMPLER: KILL SAME NOTE id=%d\r\n", id);
+        //ESP_LOGI("","SAMPLER: KILL SAME NOTE id=%d", id);
         return;
       }
       score = Voices[i].getKillScore();
@@ -357,7 +356,7 @@ void SamplerEngine::freeSomeVoices() {
   }
   if ( ( n + SACRIFY_VOICES ) > MAX_POLYPHONY ) {
     Voices[id].end(Adsr::END_FAST);
-    //ESP_LOGI("","SAMPLER: KILL EXTRA VOICE id=%d\r\n", id);
+    //ESP_LOGI("","SAMPLER: KILL EXTRA VOICE id=%d", id);
     return;
   }
 }
