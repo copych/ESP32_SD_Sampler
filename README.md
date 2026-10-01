@@ -1,3 +1,6 @@
+# Important notes
+This branch will not either progress or have support any more. This is a stale point, after it a lot of breaking changes are introduced.
+
 !Attention! ESP Arduino cores v.3.1.2 and 3.1.3 have some bug that won't allow i2s driver to install when PSRAM is enabled, please, avoid using these versions!
 
 # ESP32 SD Sampler
