@@ -8,6 +8,9 @@
 #include <FixedString.h>
 #include "voice.h"
 #include "sdmmc.h"
+#include "adaptive_polyphony.h"
+
+
 
 enum eVoiceAlloc_t  { VA_OLDEST, VA_MOST_QUIET, VA_PERCEPTUAL, VA_NUMBER }; // not implemented
 enum eVeloCurve_t   { VC_LINEAR, VC_CUSTOM, VC_SOFT1, VC_SOFT2, VC_SOFT3, VC_HARD1, VC_HARD2, VC_HARD3, VC_CONST, VC_NUMBER }; // VC_LINEAR, VC_CUSTOM implemented
@@ -30,10 +33,12 @@ typedef struct {
   int         velo_layer  = -1;
   int         limit_same  = 2;
   float       attack_time   = 0.0f;
-  float       decay_time    = 0.5f;
-  float       sustain_level = 1.0f;
-  float       release_time  = 12.0f;
-  bool        loop          = false;
+  float       decay_time    = 8.0f;
+  float       sustain_level = 0.0f;
+  float       release_time  = 0.2f;
+  eLoopType_t loop_type     = LOOP_NONE;
+  int32_t     loop_start    = -1; // INI override, PCM frame index
+  int32_t     loop_end      = -1; // INI override, exclusive PCM frame index
   inline void clear(eInstr_t t) {
     first         = 0;
     last          = 127;
@@ -43,10 +48,12 @@ typedef struct {
     speed         = 1.0f;
     limit_same    = 2;
     attack_time   = 0.0f;
-    decay_time    = 0.5f;
-    sustain_level = 1.0f;
-    release_time  = 12.0f;
-    loop          = false;
+    decay_time    = 8.0f;
+    sustain_level = 0.0f;
+    release_time  = 0.2f;
+    loop_type     = LOOP_NONE;
+    loop_start    = -1;
+    loop_end      = -1;
   }
 } ini_range_t;
 
@@ -60,10 +67,12 @@ typedef struct {
   int         group         = -1;
   int         limit_same    = 2;
   float       attack_time   = 0.0f;
-  float       decay_time    = 0.01f;
-  float       sustain_level = 1.0f;
-  float       release_time  = 0.05f;
-  bool        loop          = false;
+  float       decay_time    = 8.0;
+  float       sustain_level = 0.0f;
+  float       release_time  = 0.2f;
+  eLoopType_t loop_type     = LOOP_NONE;
+  int32_t     loop_start    = -1;
+  int32_t     loop_end      = -1;
 } midikey_t;
 
 typedef struct {
@@ -88,12 +97,26 @@ class SamplerEngine {
     fname_t         getFolderName(int id)                 { return _folders[id]; }
     fname_t         getCurrentFolder()                    { return _currentFolder; }
     int             getActiveVoices();
+    int             getFolderCount() const { return _sampleSetsCount; }
+    int             getFolderId() const { return _currentFolderId; }
+    str64_t         getTitle() const { return _title; }
+    int             getVoiceLimit() const { return _maxVoices; }
+    bool            getSustain() const { return _sustain != 0; }
+    bool            needsRefill();
+    uint32_t        getUnderruns() const;
+    // Independent output volume; INI AMPLIFY remains sample-set gain.
+    void            setMasterVolume(float v) { _masterVolume.store(fminf(1.0f, fmaxf(0.0f, v)), std::memory_order_relaxed); }
+    float           getMasterVolume() const { return _masterVolume.load(std::memory_order_relaxed); }
     void            freeSomeVoices();
+    void            allNotesOff(bool immediate = false);
+    void            printStreamStats();
     int             scanRootFolder();                       // scans root folder for sample directories, returns count of valid sample folders, -1 if error
     void            loadInstrument(uint8_t noteLow=0, uint8_t noteHigh=127); // loads config and prepares samples from the current folder
     inline void     setSampleRate(unsigned int sr)        { if (sr > 1) _sampleRate = sr; }
     inline void     setRootFolder(const fname_t& rf)      { _rootFolder = rf; }
-    inline void     setMaxVoices(byte mv)                 { _maxVoices = constrain(mv, 1, MAX_POLYPHONY); }
+    void            setMaxVoices(byte mv);
+    void            updateAdaptivePolyphony();
+    void IRAM_ATTR  noteCpuPressure() { _cpuPressure.fetch_add(1, std::memory_order_relaxed); }
     inline void     setVoiceAllocMethod(eVoiceAlloc_t va) { _voiceAllocMethod = va ; }
     inline void     setCurrentFolder(int folder_id);        // sets current folder to the desired path[folder_id]
     inline void     setNextFolder();                        // sets current folder to the next dir which was found during scanFolders()
@@ -119,6 +142,10 @@ class SamplerEngine {
     void            fillBuffer();
     
   private:
+    std::atomic<float> _masterVolume{1.0f};
+    std::atomic<uint32_t> _cpuPressure{0};
+    // Cumulative diagnostic counters; accessed only by ControlTask.
+    uint32_t        _stealsImmediate = 0, _stealsPolyphony = 0, _stealsSameNote = 0;
     SDMMC_FAT32*    _Card;
     inline int      assignVoice(byte midi_note, byte midi_velocity);    // returns id of a slot to use for a new note
     void            parseIni();                  // loads config from current folder, determining how wav files spread over the notes/velocities
@@ -131,7 +158,7 @@ class SamplerEngine {
     eInstr_t        parseInstrType( str256_t& val );
     variants_t      parseVariants( str256_t& val); 
     void            parseLimits( str256_t& val); 
-    void            parseWavHeader(entry_t* entry, sample_t& smp);
+    void            parseWavHeader(entry_t* entry, sample_source_t& source);
     void            applyRange(ini_range_t& range);
     void            finalizeMapping();
     void            buildVeloCurve();
@@ -141,6 +168,7 @@ class SamplerEngine {
     uint8_t         midiNoteByName(str8_t noteName);
     void            printMapping();
     sample_t WORD_ALIGNED_ATTR       _sampleMap[128][MAX_VELOCITY_LAYERS];
+    std::vector<sample_source_t>     _sampleSources;
     midikey_t       _keyboard[128];
     uint8_t         _groups[128][ ( ( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ) ];      // each of 128 elements contains notes to shoot when it starts
     float           _ampCurve[128];       // velocity to amplification mapping [0.0 ... 1.0] to make seamless velocity response curve
@@ -150,7 +178,9 @@ class SamplerEngine {
     float           _divVeloLayers        = 1.0f;
     int             _sampleRate           = SAMPLE_RATE;
     uint8_t         _sampleChannels       = WAV_CHANNELS; // 2 = stereo, 1 = mono : use or not stereo data in sample files
-    uint8_t         _maxVoices            = MAX_POLYPHONY; 
+    uint8_t         _maxVoices            = MAX_POLYPHONY;
+    uint8_t         _allocatedVoices      = 0; 
+    AdaptivePolyphony _adaptivePolyphony;
     int             _limitSameNotes       = MAX_SAME_NOTES;
     fname_t         _rootFolder           ;
     volatile int    _currentFolderId      = 0;
@@ -178,3 +208,4 @@ class SamplerEngine {
     std::vector<template_item_t>  _template;
     std::vector<ini_range_t>      _ranges  ;
 };
+

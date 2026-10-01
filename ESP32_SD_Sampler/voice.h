@@ -1,143 +1,111 @@
 #pragma once
-#define   BUF_EXTRA_BYTES   32    // for buffer overlapping
-#define   BUF_NUMBER        2     // tic-tac don't change, for readability only
-#define   CHANNELS          2     // 1 = mono, 2 = stereo
-#define   BYTES_PER_CHANNEL 2
-
-const int   BUF_SIZE_BYTES      = (READ_BUF_SECTORS * BYTES_PER_SECTOR);
-const float DIV_BUF_SIZE_BYTES  = (1.0f / BUF_SIZE_BYTES);
-const int   start_byte[5]       = { 0, 0, 0, 1, 2 }; // offset values for [-], 8, 16, 24, 32 pcm bits per channel 
-
+#include <atomic>
 #include "adsr.h"
+#ifdef SAMPLER_HOST_TEST
+#include "tests/host_platform.h"
+#else
 #include "sdmmc.h"
+#endif
+#include "pcm_stream.h"
+#if DEBUG_AUDIO_DIAGNOSTICS
+#include "audio_debug.h"
+#endif
 
-typedef struct __attribute__((packed)){
-  char riff[4] = {'R', 'I', 'F', 'F'};
-  uint32_t fileSize;                    // actually, ( filesize-8 )
-  char waveType[4] = {'W', 'A', 'V', 'E'};
-  char format[4] = {'f', 'm', 't', ' '};
-  uint32_t lengthOfData = 16;           // length of the rest of the header : 16 for PCM
-  uint16_t audioFormat = 1;             // 1 for PCM
-  uint16_t numberOfChannels = 2;        // 1 - mono, 2 - stereo
-  uint32_t sampleRate = 44100;        
-  uint32_t byteRate = 44100 * 2 * 2;    // sample rate * number of channels * bytes per sample
-  uint16_t blockAlign = 16 / 8  * 2;    // bytes per sample (all channels)
-  uint16_t bitsPerSample = 16;
-  char dataStr[4] = {'d', 'a', 't', 'a'};
-  uint32_t dataSize;  
-} wav_header_t;
+static constexpr uint32_t VOICE_BUFFER_FRAMES = READ_BUF_SECTORS * BYTES_PER_SECTOR / sizeof(PcmFrame);
 
-typedef struct {
-  int       byte_offset = 44;     // = wav header size
-  uint32_t  size;
-  uint32_t  data_size;
-  float     orig_freq;
-  float     speed         = 0.0f; // samples
-  uint8_t   orig_velo_layer;
-  int       sample_rate   = 44100;
-  int       channels      = -1;
-  int       bit_depth     = -1;
-  float     amp           = 1.0f;
-//  float     attack_time   = 0.0f;
-//  float     decay_time    = 0.5f;
-//  float     sustain_level = 1.0f;
-//  float     release_time  = 12.0f;
-  int       loop_mode     = 0; // 0 = none,  1 = forward
-  int32_t   loop_first_smp= -1;
-  int32_t   loop_last_smp = -1;
-  bool      native_freq   = false;
-  // FixedString<4>    name; // only used in SamplerEngine::printMapping()
-  std::vector<chain_t>   sectors;
-} sample_t;
+static constexpr uint16_t INVALID_SAMPLE_SOURCE = UINT16_MAX;
+
+// Stored once for every WAV found in the current sample-set.
+struct sample_source_t {
+    uint32_t byte_offset = 0, size = 0, data_size = 0;
+    int sample_rate = 44100, channels = 0, bit_depth = 0;
+    uint32_t loop_first_smp = 0, loop_last_smp = 0;
+    bool loop_points = false;
+    std::vector<chain_t> sectors;
+};
+
+// Compact note/velocity mapping. Many cells can refer to the same WAV while
+// carrying their own pitch, gain and resolved loop interval.
+struct sample_t {
+    uint16_t source = INVALID_SAMPLE_SOURCE;
+    uint8_t orig_velo_layer = 0;
+    bool native_freq = false;
+    float speed = 0, amp = 1;
+    uint32_t loop_first_smp = 0, loop_last_smp = 0;
+    int8_t loop_mode = LOOP_NONE;
+};
+
+static_assert(sizeof(sample_t) <= 24,
+              "sample_t grew: the 128x16 map must remain compact");
 
 class Voice {
-  public:
-    Voice(){};
-    bool              init(SDMMC_FAT32* Card, uint32_t* sustain, uint32_t* normalized);
-    bool              allocateBuffers();
-    void              getSample(float& L, float& R);
-    inline float      interpolate(float& s1, float& s2, float i);
-    void              start(const sample_t nextSmp, uint8_t nextNote, uint8_t nextVelo);
-    void              end(Adsr::eEnd_t);
-    void              fadeOut();
-    void              feed();
-    inline uint32_t   hunger();
-    inline void       setStarted(uint32_t st)   {_started = st;}
-    inline void       setPressed(uint32_t pr)   {_pressed = pr;}
-    inline void       setPitch(float speedModifier);
-    inline int        getChannels()   {return _sampleFile.channels;}
-    inline uint32_t       isActive()      {return _active;}
-    inline uint32_t       isDying()       {return _dying;}
-    inline uint8_t    getMidiNote()   {return _midiNote;}
-    inline uint8_t    getMidiVelo()   {return _midiVelo;}
-    inline uint32_t   getBufPlayed()  {return _bufPlayed;}
-    inline float      getAmplitude()  {return _amplitude;}
-    inline float      getKillScore()        ;
-    inline int        getPlayPos()    {return _bufPosSmp[_idToPlay];}
-    inline uint32_t   getBufSize()    {return _bufSizeSmp;}
-    inline void       toggleBuf();
-    inline void       setAttackTime(float timeInS)    {AmpEnv.setAttackTime(timeInS, 0.0f);}
-    inline void       setDecayTime(float timeInS)     {AmpEnv.setDecayTime(timeInS);}
-    inline void       setReleaseTime(float timeInS)   {AmpEnv.setReleaseTime(timeInS);}
-    inline void       setSustainLevel(float normLevel){AmpEnv.setSustainLevel(normLevel);}
-    int my_id =0;
-    
-  private:
-  // some members are volatile because they are used in different tasks on both cores, while real-time conditions require immediate changes without caching 
-    SDMMC_FAT32*        _Card                   ;
-    uint32_t*               _sustain                ; // every voice needs to know if sustain is ON. 
-    uint32_t*               _normalized             ;
-    float WORD_ALIGNED_ATTR              _amp                    = 1.0f;    
-    uint32_t                _active                 = false;
-    volatile uint32_t       _dying                  = false;
-    volatile uint32_t       _started                = false;
-    uint8_t* WORD_ALIGNED_ATTR           _buffer0;                         // pointer to the 1st allocated SD-reader buffer
-    uint8_t* WORD_ALIGNED_ATTR           _buffer1;                         // pointer to the 2nd allocated SD-reader buffer
-    uint8_t* WORD_ALIGNED_ATTR           _playBuffer;                      // pointer to the buffer which is being played (one of the two toggling buffers)
-    uint8_t* WORD_ALIGNED_ATTR           _fillBuffer;                      // pointer to the buffer which awaits filling (one of the two toggling buffers)
-    uint8_t             _buffersReady           = 0;  // counter
-    uint32_t            _bufSizeBytes           = BUF_SIZE_BYTES;
-    uint32_t            _read_buf_sectors       = READ_BUF_SECTORS;
-    uint32_t            _bufSizeSmp             = 0;
-    int                 _changedBufBytes        = 0;
-    uint32_t            _hunger                 = 0;
-    int                 _bytesToRead            = 0;      // can be negative
-    uint32_t            _bytesToPlay            = 0;
-    int                 _playBufOffset          = 0;      // play-buffer byte offset till the 1st sample
-    int                 _fillBufOffset          = 0;      // fill-buffer byte offset till the 1st sample
-    int WORD_ALIGNED_ATTR       _pL1, _pL2, _pR1, _pR2  ;
-    int                 _samplesInFillBuf       = 0;
-    int                 _samplesInPlayBuf       = 0;
-    volatile int WORD_ALIGNED_ATTR       _posSmp                 = 0;      // global position in terms of samples
-    volatile int WORD_ALIGNED_ATTR       _bufPosSmp[2]           = {0, 0}; // sample pos, it depends on the number of channels and bit depth of a wav file assigned to this voice;
-    float WORD_ALIGNED_ATTR              _bufPosSmpF             = 0.0f;   // exact calculated sample reading position including speed, pitchbend etc. 
-    bool                _bufEmpty[2]            = {true, true};
-    uint32_t WORD_ALIGNED_ATTR           _fullSampleBytes        = 4;      // bytes
-    float               _divFileSize            = 0.001f;
-    float               _divVelo                = 0;
-    volatile int        _idToFill               = 0;      // tic-tac buffer id
-    volatile int        _idToPlay               = 1;
-    uint8_t             _midiNote               = 0;
-    uint8_t             _midiVelo               = 0;    
-    float               _speed                  = 1.0f;   // _speed param corrects the central freq of a sample 
-    float               _speedModifier          = 1.0f;   // pitchbend, portamento etc. 
-    volatile uint32_t   _lastSectorRead         = 0;      // last sector that was read during this sample playback
-    uint32_t            _curChain               = 0;      // current chain (linear non-fragmented segment of a sample file) index
-    uint32_t            _bufPlayed              = 0;      // number of buffers played (for float correction)
-    uint32_t            _coarseBytesPlayed      = 0;
-    uint32_t            _bytesPlayed            = 0;
-    float               _amplitude              = 0.0f;
-    volatile uint32_t       _pressed                = false;
-    volatile uint32_t       _eof                    = true;
-    volatile float      _killScoreCoef          = 1.0f;
-    volatile float      _hungerCoef             = 1.0f;
-    uint32_t                _loop                   = false;
-    int                 _loopState              = 0;
-    uint32_t            _loopFirstSmp           = 0;
-    uint32_t            _loopLastSmp            = 0;
-    uint32_t            _loopFirstSector        = 0;
-    uint32_t            _loopLastSector         = 0;
-    int                 _lowest                 = 1;
-    Adsr                AmpEnv                  ;
-    sample_t WORD_ALIGNED_ATTR            _sampleFile             ;
+public:
+    bool init(SDMMC_FAT32*, uint32_t* sustain, uint32_t* normalized);
+    bool allocateBuffers();
+    void start(const sample_source_t&, const sample_t&, uint8_t note, uint8_t velocity);
+    void end(Adsr::eEnd_t);
+    void feed();
+    void getSample(float& left, float& right);
+    uint32_t hunger();
+    void setPressed(uint32_t pressed) { _pressed = pressed; }
+    void setPitch(float modifier);
+    int getChannels() const { return _sampleSource ? _sampleSource->channels : 0; }
+    bool isActive() const { return _active.load(); }
+    bool isDying() const { return _dying.load(); }
+    uint8_t getMidiNote() const { return _midiNote; }
+    uint8_t getMidiVelo() const { return _midiVelo; }
+    float getKillScore() const;
+    void setAttackTime(float value);
+    void setDecayTime(float value);
+    void setReleaseTime(float value);
+    void setSustainLevel(float value);
+    uint32_t underruns() const { return _underruns.load(); }
+    uint32_t maxFeedMicros() const { return _maxFeedMicros; }
+    int my_id = 0;
+private:
+#ifdef SAMPLER_HOST_TEST
+    friend struct VoiceTestAccess;
+#endif
+    struct Slot {
+        PcmFrame* pcm = nullptr;
+        uint32_t count = 0;
+        bool final = false;
+        std::atomic<bool> ready{false};
+    } _slots[2];
+    // Core1 waits for the current render call when changing lifecycle/envelope.
+    // Core0 checks flags only: no allocation, I/O, locks or waiting.
+    void pauseAudio();
+    void resumeAudio() { _enabled.store(true); }
+    std::atomic<bool> _enabled{false}, _rendering{false}, _active{false}, _dying{false};
+    SDMMC_FAT32* _card = nullptr;
+    uint32_t* _sustain = nullptr;
+    uint32_t* _normalized = nullptr;
+    sample_t _sampleFile;
+    const sample_source_t* _sampleSource = nullptr;
+    Adsr AmpEnv;
+    PcmProducer _producer;
+    PcmFrame* _loopCache = nullptr;
+    uint32_t _cacheCount = 0, _cacheCapacity = 0, _cacheFirst = 0, _cacheAllocated = 0;
+    unsigned _writeSlot = 0, _readSlot = 0;
+    bool _producedFinal = false, _pressed = false, _hasPlayed = false;
+    uint8_t _midiNote = 255, _midiVelo = 0;
+    float _position = 0, _speed = 1, _speedModifier = 1, _amp = 0, _killScoreCoef = 0;
+    float _lastL = 0, _lastR = 0;
+    // Audio-core-owned fallback while Core1 briefly updates voice state. Using
+    // the last frame avoids inserting a zero sample into an otherwise
+    // continuous release. Core1 never accesses these fields.
+    float _pauseHoldL = 0, _pauseHoldR = 0;
+    unsigned _underrunFade = 0;
+    std::atomic<uint32_t> _playedFrames{0}, _underruns{0};
+    std::atomic<uint32_t> _framesRemaining{0};
+    uint32_t _maxFeedMicros = 0;
+#if DEBUG_AUDIO_DIAGNOSTICS
+    // Audio-core-owned history survives control-side start/end resets.
+    bool _debugPaused = false, _debugExpectFirst = false;
+    bool _debugReleasePending = false, _debugResumePending = false;
+    uint32_t _debugPauseSamples = 0;
+    uint8_t _debugReleaseNote = 255;
+    PcmFrame _debugExpectedFirst;
+    float _debugLastL = 0, _debugLastR = 0;
+#endif
 };

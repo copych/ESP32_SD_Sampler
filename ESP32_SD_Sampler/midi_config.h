@@ -27,6 +27,15 @@ CC 102 - 119
 #define CC_SUSTAIN      64 // +
 #define CC_PORTAMENTO   65
 
+// RDX two-slot chain: value 0..7 selects THRU, DISTORTION, TOUCHWAH,
+// CHORUS, FLANGER, PHASER, DELAY or REVERB.  Parameters are effect-specific.
+#define CC_FX1_TYPE     20
+#define CC_FX2_TYPE     21
+#define CC_FX1_PARAM1   22
+#define CC_FX1_PARAM2   23
+#define CC_FX2_PARAM1   24
+#define CC_FX2_PARAM2   25
+
 #define CC_WAVEFORM     70
 #define CC_RESO         71 
 #define CC_CUTOFF       74 

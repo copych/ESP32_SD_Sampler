@@ -47,7 +47,7 @@ void i2sDeinit() {
 
 static void i2s_output () {
   // now out_buf is ready, output
-  size_t bytes_written;
+  size_t bytes_written = 0;
 
 
   for (int i=0; i < DMA_BUF_LEN; i++) {
@@ -56,7 +56,13 @@ static void i2s_output () {
    // if (i%4==0) ESP_LOGI("",out_buf[i*2]);
    // if (out_buf[i*2]) ESP_LOGI(""," %d ", out_buf[i*2]);
   }
-  i2s_write(i2s_num, out_buf, sizeof(out_buf), &bytes_written, portMAX_DELAY);
+  const esp_err_t status = i2s_write(i2s_num, out_buf, sizeof(out_buf), &bytes_written, portMAX_DELAY);
+#if DEBUG_AUDIO_DIAGNOSTICS
+  if (status != ESP_OK || bytes_written != sizeof(out_buf)) {
+    audio_debug::audio.mark(audio_debug::I2S_ERROR);
+    audio_debug::audio.event(audio_debug::I2S_ERROR, micros() / 1000, bytes_written, uint32_t(status));
+  }
+#endif
 
 }
 
@@ -106,12 +112,18 @@ void i2sInit() {
 
 static void i2s_output () {
   // now out_buf is ready, output
-  size_t* bytes_written;
+  size_t bytes_written = 0;
   for (int i=0; i < DMA_BUF_LEN; i++) {
     out_buf[i*2] = (float)0x7ffe * mix_buf_l[i] + 1; 
     out_buf[i*2+1] = (float)0x7ffe * mix_buf_r[i] + 1;
   } 
-  i2s_channel_write(tx_handle, out_buf, sizeof(out_buf), bytes_written, portMAX_DELAY);
+  const esp_err_t status = i2s_channel_write(tx_handle, out_buf, sizeof(out_buf), &bytes_written, portMAX_DELAY);
+#if DEBUG_AUDIO_DIAGNOSTICS
+  if (status != ESP_OK || bytes_written != sizeof(out_buf)) {
+    audio_debug::audio.mark(audio_debug::I2S_ERROR);
+    audio_debug::audio.event(audio_debug::I2S_ERROR, micros() / 1000, bytes_written, uint32_t(status));
+  }
+#endif
 }
 
 
@@ -130,10 +142,17 @@ static void mixer() { // sum buffers
   float meter = 0.0f;
 #endif
   const float attenuator = 0.1f;
+  const float masterTarget = Sampler.getMasterVolume();
+  static float masterGain = 1.0f;
+#if DEBUG_AUDIO_DIAGNOSTICS
+  uint32_t clipped = 0, nonfinite = 0;
+  float peak = 0, jump = 0;
+  static float previousL = 0, previousR = 0;
+  static float previousDeltaL = 0, previousDeltaR = 0;
+  static bool edgePrimed = false, wasClipping = false;
+#endif
   float sampler_out_l, sampler_out_r;
   float mono_mix;
-  float dly_l, dly_r;
-  float rvb_l, rvb_r;
   
     for (int i=0; i < DMA_BUF_LEN; i++) {
       
@@ -154,22 +173,55 @@ static void mixer() { // sum buffers
 */
 
 
-      rvb_l = (float)sampler_out_l * (float)Sampler.getReverbSendLevel(); // reverb bus
-      rvb_r = (float)sampler_out_r * (float)Sampler.getReverbSendLevel();
-      Reverb.Process( &rvb_l, &rvb_r );
-      
-      sampler_out_l += (float)rvb_l;
-      sampler_out_r += (float)rvb_r;
+      mix_buf_l[i] = sampler_out_l;
+      mix_buf_r[i] = sampler_out_r;
+    }
 
-      
-      mono_mix = 0.5f * ((float)sampler_out_l + (float)sampler_out_r);
+  // RDX effects operate on a complete audio block. Their long state buffers
+  // are in PSRAM, so this does not compete with the SD streaming buffers.
+  Effects.process(mix_buf_l, mix_buf_r, DMA_BUF_LEN);
+
+  for (int i=0; i < DMA_BUF_LEN; i++) {
+      sampler_out_l = mix_buf_l[i];
+      sampler_out_r = mix_buf_r[i];
+      // Smooth GUI volume over a few milliseconds, including effect tails.
+      masterGain += 0.005f * (masterTarget - masterGain);
+      sampler_out_l *= masterGain;
+      sampler_out_r *= masterGain;
+      mono_mix = 0.5f * (sampler_out_l + sampler_out_r);
       
   //    Comp.Process( mono_mix * 0.25f);  // calc compressor gain, may be side-chain driven 
             
   //    mix_buf_l[i] = Comp.Apply(sampler_out_l);
   //    mix_buf_r[i] = Comp.Apply(sampler_out_r);
-      mix_buf_l[i] = ((float)sampler_out_l);
-      mix_buf_r[i] = ((float)sampler_out_r);
+      mix_buf_l[i] = sampler_out_l;
+      mix_buf_r[i] = sampler_out_r;
+#if DEBUG_AUDIO_DIAGNOSTICS
+      if (!isfinite(sampler_out_l) || !isfinite(sampler_out_r)) ++nonfinite;
+      else {
+        peak = fmaxf(peak, fmaxf(fabsf(sampler_out_l), fabsf(sampler_out_r)));
+        if (fabsf(sampler_out_l) > 1 || fabsf(sampler_out_r) > 1) ++clipped;
+        const float l = fclamp(sampler_out_l, -1.f, 1.f), r = fclamp(sampler_out_r, -1.f, 1.f);
+        const float deltaL = l - previousL, deltaR = r - previousR;
+        const float sampleJump = fmaxf(fabsf(deltaL), fabsf(deltaR));
+        jump = fmaxf(jump, sampleJump);
+        if (edgePrimed) {
+          // Second difference: a sharp change of slope is a better click signature
+          // than a large first difference, which is common in valid HF audio.
+          const float edge = fmaxf(fabsf(deltaL - previousDeltaL),
+                                   fabsf(deltaR - previousDeltaR));
+          if (edge >= .015f) {
+            const uint32_t edgePpm = audio_debug::level(edge, 0);
+            audio_debug::audio.mark(audio_debug::EDGE_EVENT, edgePpm);
+            // Keep the tiny event queue useful: only stronger edges get timestamps.
+            if (edge >= .025f)
+              audio_debug::audio.event(audio_debug::EDGE_EVENT, micros() / 1000, i, edgePpm);
+          }
+        } else edgePrimed = true;
+        previousDeltaL = deltaL; previousDeltaR = deltaR;
+        previousL = l; previousR = r;
+      }
+#endif
 
 #ifdef DEBUG_MASTER_OUT
       if ( i % 16 == 0) meter = (float)meter * 0.95f + fabs( mono_mix); 
@@ -184,6 +236,14 @@ static void mixer() { // sum buffers
    //   mix_buf_r[i] = fast_shape( mix_buf_r[i]);
    }
    
+#if DEBUG_AUDIO_DIAGNOSTICS
+  audio_debug::audio.mark(audio_debug::MIX_CLIP, audio_debug::level(peak, 0), clipped);
+  audio_debug::audio.mark(audio_debug::MIX_NONFINITE, 0, nonfinite);
+  audio_debug::audio.mark(audio_debug::OUTPUT_JUMP, audio_debug::level(jump, 0), jump >= .05f ? 1 : 0);
+  if (clipped && !wasClipping)
+    audio_debug::audio.event(audio_debug::MIX_CLIP, micros() / 1000, 0, audio_debug::level(peak, 0));
+  wasClipping = clipped != 0;
+#endif
 #ifdef DEBUG_MASTER_OUT
   meter *= 0.95f;
   meter += fabs(mono_mix); 

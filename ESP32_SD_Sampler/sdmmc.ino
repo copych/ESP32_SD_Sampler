@@ -110,8 +110,8 @@ void SDMMC_FAT32::begin(void)
 
 
 
-    sd_pwr_ctrl_ldo_config_t ldo_config;
 #if defined CONFIG_IDF_TARGET_ESP32P4
+    sd_pwr_ctrl_ldo_config_t ldo_config;
     #ifndef BOARD_SDMMC_POWER_CHANNEL
       #define BOARD_SDMMC_POWER_CHANNEL 4 // GPIO45 of ESP32P4
     #endif

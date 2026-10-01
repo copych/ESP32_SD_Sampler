@@ -84,6 +84,16 @@ void handleCC(uint8_t inChannel, uint8_t cc_number, uint8_t cc_value) {
   bool onoff = 0;
   float scaled;
   switch (cc_number) { // global parameters yet set via ANY channel CCs
+    case CC_FX1_TYPE:
+      Effects.setSlot(0, (RdxFxId)(cc_value > RDX_FX_REVERB ? RDX_FX_REVERB : cc_value), Effects.param(0, 0), Effects.param(0, 1));
+      break;
+    case CC_FX2_TYPE:
+      Effects.setSlot(1, (RdxFxId)(cc_value > RDX_FX_REVERB ? RDX_FX_REVERB : cc_value), Effects.param(1, 0), Effects.param(1, 1));
+      break;
+    case CC_FX1_PARAM1: Effects.setParam(0, 0, cc_value); break;
+    case CC_FX1_PARAM2: Effects.setParam(0, 1, cc_value); break;
+    case CC_FX2_PARAM1: Effects.setParam(1, 0, cc_value); break;
+    case CC_FX2_PARAM2: Effects.setParam(1, 1, cc_value); break;
     case CC_SUSTAIN:
       onoff = cc_value >> 6;
       Sampler.setSustain(onoff);
@@ -127,13 +137,13 @@ void handleCC(uint8_t inChannel, uint8_t cc_number, uint8_t cc_value) {
       break;
     case CC_REVERB_TIME:
       scaled = (float)cc_value * MIDI_NORM;
-      Reverb.SetTime(scaled);
-      ESP_LOGI("","SAMPLER: MIDI: Reverb Set Time %f s\r\n", scaled);
+      Effects.setParam(0, 1, cc_value);
+      ESP_LOGI("","SAMPLER: MIDI: RDX reverb time %f\r\n", scaled);
       break;
     case CC_REVERB_LVL:
       scaled = (float)cc_value * MIDI_NORM;
-      Reverb.SetLevel(scaled);
-      ESP_LOGI("","SAMPLER: MIDI: Reverb Set Level %f s\r\n", scaled);
+      Effects.setParam(0, 0, cc_value);
+      ESP_LOGI("","SAMPLER: MIDI: RDX reverb level %f\r\n", scaled);
       break;
 /*
     case CC_DELAY_TIME:
@@ -163,9 +173,14 @@ void handleCC(uint8_t inChannel, uint8_t cc_number, uint8_t cc_value) {
       ESP_LOGI("","SAMPLER: MIDI: Set Send To Reverb %f s\r\n", scaled);
       break;
     case CC_RESET_CCS:
+      Sampler.setSustain(false);
+      Sampler.setPitch(0);
+      break;
     case CC_NOTES_OFF:
+      Sampler.allNotesOff();
+      break;
     case CC_SOUND_OFF:
-      //Sampler.endAll();
+      Sampler.allNotesOff(true);
       break;
   }
 }

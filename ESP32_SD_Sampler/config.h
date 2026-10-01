@@ -15,24 +15,55 @@
 
 #define RECEIVE_MIDI_CHAN     0
 
+// Minimal RDX-style SH1106 128x64 I2C GUI, serviced on Core1.
+// P4 stays headless until a conflict-free display/control pinout is selected.
+#ifndef SAMPLER_GUI
+  #if defined(CONFIG_IDF_TARGET_ESP32S3)
+    #define SAMPLER_GUI 1
+  #else
+    #define SAMPLER_GUI 0
+  #endif
+#endif
+#if SAMPLER_GUI
+  #if defined(MIDI_VIA_SERIAL2)
+    #error "Default GUI SCL (9) conflicts with MIDI UART TX; select separate pins first"
+  #endif
+  #define GUI_SDA 8
+  #define GUI_SCL 9
+  #define GUI_OLED_ADDRESS 0x3C
+  #define GUI_ENC_A 15
+  #define GUI_ENC_B 16
+  #define GUI_ENC_BUTTON 14
+  #define GUI_PREV_BUTTON 41
+  #define GUI_NEXT_BUTTON 42
+  #define GUI_BACK_BUTTON 2
+  #define GUI_PANIC_BUTTON 1
+  #define GUI_ENCODER_DIRECTION 1 // change to -1 to reverse rotation
+#endif
+
 //******************************************************* FILESYSTEM **********************************************
 #define INI_FILE              "sampler.ini"
 #define ROOT_FOLDER           "/"         // only </> is supported yet
 
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-  #define READ_BUF_SECTORS      5           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
+  // The compact sample map recovered enough internal RAM for the same streaming
+  // profile as P4: two 8-sector PCM buffers for each of 20 voices.
+  #define READ_BUF_SECTORS      8
 #elif defined CONFIG_IDF_TARGET_ESP32P4
-  #define READ_BUF_SECTORS      8           // that many sectors (assume 512 Bytes) per read operation, the more, the faster it reads
+  #define READ_BUF_SECTORS      8
 #endif
 
 //******************************************************* SAMPLER **********************************************
 #ifdef CONFIG_IDF_TARGET_ESP32S3
-  #define MAX_POLYPHONY         15          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 156
+  #define MAX_POLYPHONY         17
 #elif defined CONFIG_IDF_TARGET_ESP32P4
-  #define MAX_POLYPHONY         20          // empiric : MAX_POLYPHONY * READ_BUF_SECTORS <= 180
+  #define MAX_POLYPHONY         20
 #endif
 #define SACRIFY_VOICES        1           // voices used for smooth transisions to avoid clicks
 #define MAX_SAME_NOTES        2           // number of voices allowed playing the same note
+#define MAX_PLAYBACK_SPEED   8.0f        // maximum source frames per output frame
+#define DEBUG_STREAM_STATS                // Core1 refill latency, underruns and voice-steal counters
+#define DEBUG_AUDIO_DIAGNOSTICS 1         // counters/events only; printed during silence
 #define MAX_VELOCITY_LAYERS   16
 #define MAX_NOTES_PER_GROUP   3           // exclusive groups: e.g. Closed hat, Pedal hat and Open hat -- only one of them can play at a time
 #define MAX_GROUPS_CROSSES    1           // max possible exclusive groups interleaving (common is 1, meaning no interleavings)
@@ -98,7 +129,7 @@
 
 
 #elif defined(CONFIG_IDF_TARGET_ESP32P4)
-  #define BUTTON1_GPIO 8
+  #define BUTTON1_GPIO 35
   #define MIDIRX_PIN      15      // if USE_MIDI_STANDARD is selected as MIDI_IN, this pin receives MIDI messages
   #define MIDITX_PIN      14
 

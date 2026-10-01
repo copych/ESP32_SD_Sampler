@@ -1,10 +1,15 @@
 #include "sampler.h"
 #include "sdmmc_file.h"
+#include "sd_stream.h"
+#include "wav_metadata.h"
+#include <errno.h>
 
 void SamplerEngine::parseIni() {
   eSection_t section = S_NONE;
   _veloCurve = VC_LINEAR;
   ini_range_t range;
+  eLoopType_t globalLoopType = LOOP_NONE;
+  int32_t globalLoopStart = -1, globalLoopEnd = -1;
   _template.clear();
   _ranges.clear();
   variants_t grps;
@@ -32,6 +37,9 @@ void SamplerEngine::parseIni() {
     if (iniStr.startsWith("[") && iniStr.endsWith("]")) {           // new section
       if (section==S_NOTE || section==S_RANGE) applyRange(range);   // save parsed range/note section
       range.clear(_type);
+      range.loop_type = globalLoopType;
+      range.loop_start = globalLoopStart;
+      range.loop_end = globalLoopEnd;
       section = parseSection(iniStr);
       //ESP_LOGI("",section);
       continue;
@@ -87,7 +95,24 @@ void SamplerEngine::parseIni() {
         if (tok == "DECAYTIME" || tok == "DECAY_TIME") {range.decay_time = parseFloatValue(iniStr); continue;}
         if (tok == "RELEASETIME" || tok == "RELEASE_TIME") {range.release_time = parseFloatValue(iniStr); continue;}
         if (tok == "SUSTAINLEVEL" || tok == "SUSTAIN_LEVEL") {range.sustain_level = parseFloatValue(iniStr); continue;}
-        if (tok == "LOOP" || tok == "AUTOREPEAT" || tok == "REPEAT" || tok == "CYCLE" ) {range.loop = parseBoolValue(iniStr); continue;}
+        if (tok == "LOOP_TYPE") {
+          if (iniStr == "NONE") range.loop_type = LOOP_NONE;
+          else if (iniStr == "FORWARD") range.loop_type = LOOP_FORWARD;
+          else if (iniStr == "SUSTAIN") range.loop_type = LOOP_SUSTAIN;
+          else if (iniStr == "PINGPONG") range.loop_type = LOOP_PINGPONG;
+          else ESP_LOGW("", "INI: invalid LOOP_TYPE: %s", iniStr.c_str());
+          continue;
+        }
+        if (tok == "LOOP_START" || tok == "LOOP_END") {
+          char* endptr = nullptr;
+          errno = 0;
+          long v = strtol(iniStr.c_str(), &endptr, 10);
+          if (!iniStr.empty() && endptr != iniStr.c_str() && *endptr == '\0' && errno != ERANGE && v >= 0 && v <= INT32_MAX) {
+            if (tok == "LOOP_START") range.loop_start = (int32_t)v;
+            else range.loop_end = (int32_t)v;
+          } else ESP_LOGW("", "INI: invalid %s: %s", tok.c_str(), iniStr.c_str());
+          continue;
+        }
         break;
       case S_GROUP:
         if (tok == "NOTES") {grps = parseVariants(iniStr); storeGroup(grps); continue; }
@@ -103,10 +128,27 @@ void SamplerEngine::parseIni() {
           }
           continue;
         }
-        if (tok == "LOOP" || tok == "AUTOREPEAT" || tok == "REPEAT" || tok == "CYCLE" ) {
-          bool bVal = parseBoolValue(iniStr);
+        if (tok == "LOOP_TYPE") {
+          if (iniStr == "NONE") globalLoopType = LOOP_NONE;
+          else if (iniStr == "FORWARD") globalLoopType = LOOP_FORWARD;
+          else if (iniStr == "SUSTAIN") globalLoopType = LOOP_SUSTAIN;
+          else if (iniStr == "PINGPONG") globalLoopType = LOOP_PINGPONG;
+          else { ESP_LOGW("", "INI: invalid LOOP_TYPE: %s", iniStr.c_str()); continue; }
+          for (int i=0; i<128; ++i) _keyboard[i].loop_type = globalLoopType;
+          continue;
+        }
+        if (tok == "LOOP_START" || tok == "LOOP_END") {
+          char* endptr = nullptr;
+          errno = 0;
+          long v = strtol(iniStr.c_str(), &endptr, 10);
+          if (iniStr.empty() || endptr == iniStr.c_str() || *endptr != '\0' || errno == ERANGE || v < 0 || v > INT32_MAX) {
+            ESP_LOGW("", "INI: invalid %s: %s", tok.c_str(), iniStr.c_str()); continue;
+          }
+          if (tok == "LOOP_START") globalLoopStart = (int32_t)v;
+          else globalLoopEnd = (int32_t)v;
           for (int i=0; i<128; ++i) {
-              _keyboard[i].loop = bVal;
+            if (tok == "LOOP_START") _keyboard[i].loop_start = (int32_t)v;
+            else _keyboard[i].loop_end = (int32_t)v;
           }
           continue;
         }
@@ -120,7 +162,7 @@ void SamplerEngine::parseIni() {
           }
           continue;
         }
-        if (tok == "MAX_VOICES" || tok == "MAX_POLYPHONY" || tok == "MAXPOLYPHONY" || tok == "MAXVOICES" || tok == "POLYPHONY") {_maxVoices = min(MAX_POLYPHONY, parseIntValue(iniStr)); continue;}
+        if (tok == "MAX_VOICES" || tok == "MAX_POLYPHONY" || tok == "MAXPOLYPHONY" || tok == "MAXVOICES" || tok == "POLYPHONY") {setMaxVoices(parseIntValue(iniStr)); continue;}
         if (tok == "ATTACKTIME" || tok == "ATTACK_TIME") {_attackTime = parseFloatValue(iniStr); setAttackTime(_attackTime); continue;}
         if (tok == "DECAYTIME" || tok == "DECAY_TIME") {_decayTime = parseFloatValue(iniStr); setDecayTime(_decayTime); continue;}
         if (tok == "RELEASETIME" || tok == "RELEASE_TIME") {_releaseTime = parseFloatValue(iniStr); setReleaseTime(_releaseTime); continue;}
@@ -275,6 +317,9 @@ void SamplerEngine::applyRange(ini_range_t& range) {
     _keyboard[i].decay_time     = range.decay_time;
     _keyboard[i].sustain_level  = range.sustain_level;
     _keyboard[i].release_time   = range.release_time;
+    _keyboard[i].loop_type      = range.loop_type;
+    _keyboard[i].loop_start     = range.loop_start;
+    _keyboard[i].loop_end       = range.loop_end;
   }
   ESP_LOGI("","INI: adding range for %s", range.instr.c_str());
 }
@@ -354,7 +399,6 @@ void SamplerEngine::processNameParser(entry_t* entry) {
   int match_weight = 0;
   str20_t instr = "";
   str20_t s;
-  sample_t smp;
   fname_t fname = entry->name;
   fname.toUpperCase();
   if (fname.endsWith(".WAV")) {
@@ -477,62 +521,72 @@ void SamplerEngine::processNameParser(entry_t* entry) {
       break;
     }
   }
+  uint16_t sourceId = INVALID_SAMPLE_SOURCE;
+  auto makeMapping = [&]() -> sample_t {
+    sample_t mapped;
+    if (sourceId == INVALID_SAMPLE_SOURCE) {
+      if (_sampleSources.size() >= INVALID_SAMPLE_SOURCE) {
+        ESP_LOGE("WAV", "Too many WAV sources; skipping %s", entry->name.c_str());
+        return mapped;
+      }
+      sample_source_t source;
+      source.sectors = entry->sectors;
+      source.size = entry->size;
+      parseWavHeader(entry, source);
+      if (source.bit_depth <= 0 || source.channels <= 0) return mapped;
+      sourceId = uint16_t(_sampleSources.size());
+      _sampleSources.push_back(std::move(source));
+    }
+    const sample_source_t& source = _sampleSources[sourceId];
+    mapped.source = sourceId;
+    mapped.orig_velo_layer = uint8_t(velo < 0 ? 0 : velo);
+    mapped.native_freq = true;
+    mapped.speed = float(source.sample_rate) / SAMPLE_RATE;
+    mapped.loop_first_smp = source.loop_first_smp;
+    mapped.loop_last_smp = source.loop_last_smp;
+    return mapped;
+  };
+
 // if we have note name in filename
   if (note_num>=0 && oct>=-1) {
     midi_note_num = note_num + (oct+1)*12; // midi note number
   }  
-  if (midi_note_num>=0) {
-    if ( velo >= 0 ) {
-      sample_t smp;
-      smp.orig_velo_layer = velo;
-      smp.sectors = entry->sectors;
-      smp.size = entry->size;
-      smp.native_freq = true;
-      // smp.name = (entry->name);
-      parseWavHeader(entry, smp);
-      _sampleMap[midi_note_num][velo] = smp;
+  if (midi_note_num >= 0 && midi_note_num < 128) {
+    if (velo >= 0 && velo < MAX_VELOCITY_LAYERS) {
+      _sampleMap[midi_note_num][velo] = makeMapping();
     }
   }
 
 // if we have [ranges] or [notes] in ini
-  if ( !rng_i.empty() ) {
+  if (!rng_i.empty() && velo < MAX_VELOCITY_LAYERS) {
     if (velo < 0) velo = 0;
     for (auto ix: rng_i) {
       for (int midi_note = _ranges[ix].first; midi_note<=_ranges[ix].last; midi_note++) {
-        sample_t smp;
-        smp.orig_velo_layer = velo;
-        smp.sectors = entry->sectors;
-        smp.size = entry->size;
-        smp.native_freq = true;
-        // smp.name = (entry->name);
-        parseWavHeader(entry, smp);
-        _sampleMap[midi_note][velo] = smp;
+        _sampleMap[midi_note][velo] = makeMapping();
       }
     }
   }
 }
 
 
-void SamplerEngine::parseWavHeader(entry_t* wav_entry, sample_t& smp){
-  char* buf = reinterpret_cast<char*>(_Card->readFirstSector(wav_entry)); // massive long headers won't pass here (
-  wav_header_t* wav = reinterpret_cast<wav_header_t*>(buf);
-  smp.sample_rate = wav->sampleRate;
-  smp.bit_depth = wav->bitsPerSample;
-  smp.channels = wav->numberOfChannels;
-  smp.speed = (float)(wav->sampleRate) * DIV_SAMPLE_RATE;
-  int res = -1;
-  for (int i = 0 ; i < BYTES_PER_SECTOR-4; i++) {
-    if (buf[i]=='d' && buf[i+1]=='a' && buf[i+2]=='t' && buf[i+3]=='a') {
-      res = i;
-      break;
-    }
+void SamplerEngine::parseWavHeader(entry_t* entry, sample_source_t& source) {
+  SdStreamReader reader(entry->sectors, entry->size, sdStreamWindow(),
+                        READ_BUF_SECTORS, SdSectorRead{_Card});
+  wavmeta::Info info;
+  if (!wavmeta::parse(entry->size, [&](uint32_t offset, void* dst, uint32_t size) {
+        return reader.read(offset, dst, size);
+      }, info)) {
+    source.channels = source.bit_depth = 0;
+    ESP_LOGW("WAV", "Unsupported or malformed WAV: %s", entry->name.c_str());
+    return;
   }
-  if (res >= 0 ) {
-    smp.byte_offset = res + 8;
-    smp.data_size = *(reinterpret_cast<uint32_t*>(&buf[res+4]));
-  }
+  source.byte_offset = info.offset; source.data_size = info.bytes;
+  source.sample_rate = info.rate; source.bit_depth = info.bits; source.channels = info.channels;
+  source.loop_points = info.first >= 0 && info.end >= 0;
+  if (source.loop_points) { source.loop_first_smp = uint32_t(info.first); source.loop_last_smp = uint32_t(info.end); }
+  ESP_LOGI("WAV", "%s: %lu frames, loop source=%s", entry->name.c_str(),
+           (unsigned long)info.frames, info.source);
 }
-
 
 // fill gaps
 void SamplerEngine::finalizeMapping() {
@@ -544,7 +598,7 @@ void SamplerEngine::finalizeMapping() {
   // first pass: determine the number of velocity layers used
   for (int i = 0; i < MAX_VELOCITY_LAYERS; i++) {
     for (int j = 0; j < 128; j++) {
-      if (_sampleMap[j][i].bit_depth > 0) {
+      if (_sampleMap[j][i].source != INVALID_SAMPLE_SOURCE) {
         _veloLayers = i + 1;
         break;
       }
@@ -554,21 +608,21 @@ void SamplerEngine::finalizeMapping() {
   switch((int)_type) {
     case SMP_PERCUSSIVE:
       for (int i = 0; i < 128; i++) {
-        smp.bit_depth = 0;
+        smp.source = INVALID_SAMPLE_SOURCE;
         for (int j = 0; j < _veloLayers; j++) {
-          if (_sampleMap[i][j].bit_depth > 0) {
+          if (_sampleMap[i][j].source != INVALID_SAMPLE_SOURCE) {
             smp = _sampleMap[i][j];
           } else {
-            if (smp.bit_depth > 0) {
+            if (smp.source != INVALID_SAMPLE_SOURCE) {
               _sampleMap[i][j] = smp;
             }
           }
         }
         for (int j = _veloLayers-1; j >=0; j--) {
-          if (_sampleMap[i][j].bit_depth > 0) {
+          if (_sampleMap[i][j].source != INVALID_SAMPLE_SOURCE) {
             smp = _sampleMap[i][j];
           } else {
-            if (smp.bit_depth > 0) {
+            if (smp.source != INVALID_SAMPLE_SOURCE) {
               _sampleMap[i][j] = smp;
             }
           }
@@ -596,7 +650,7 @@ void SamplerEngine::finalizeMapping() {
                 yc = mapVelo(constrain(y, 0, 127));
                 if (_sampleMap[xc][yc].speed > 0.0f ) {
                   _sampleMap[j][i] = _sampleMap[xc][yc];
-                  _sampleMap[j][i].speed = _sampleMap[xc][yc].speed * _keyboard[j].freq / _keyboard[x].freq;
+                  _sampleMap[j][i].speed = _sampleMap[xc][yc].speed * _keyboard[j].freq / _keyboard[xc].freq;
                   _sampleMap[j][i].native_freq = false;
                   break;  
                 }
@@ -611,7 +665,7 @@ void SamplerEngine::finalizeMapping() {
                 yc = mapVelo(constrain(y, 0, 127));
                 if (_sampleMap[xc][yc].native_freq) {
                   _sampleMap[j][i] = _sampleMap[xc][yc];
-                  _sampleMap[j][i].speed = _sampleMap[xc][yc].speed * _keyboard[j].freq / _keyboard[x].freq;
+                  _sampleMap[j][i].speed = _sampleMap[xc][yc].speed * _keyboard[j].freq / _keyboard[xc].freq;
                   _sampleMap[j][i].native_freq = false;
                   break;  
                 }
@@ -627,6 +681,20 @@ void SamplerEngine::finalizeMapping() {
     for (int j = 0 ; j < 128; j++ ) {
       _sampleMap[j][i].speed         *= _keyboard[j].tuning;
       _sampleMap[j][i].amp           *= _amp;
+      sample_t& mapped = _sampleMap[j][i];
+      mapped.loop_mode = LOOP_NONE;
+      if (mapped.source == INVALID_SAMPLE_SOURCE || mapped.source >= _sampleSources.size()) continue;
+      const sample_source_t& source = _sampleSources[mapped.source];
+      const uint32_t frames = source.data_size / (source.channels * (source.bit_depth / 8));
+      uint32_t first = 0, end = 0;
+      if (resolveLoop(frames, source.loop_points ? int64_t(source.loop_first_smp) : -1,
+                      source.loop_points ? int64_t(source.loop_last_smp) : -1,
+                      _keyboard[j].loop_start, _keyboard[j].loop_end, first, end)) {
+        mapped.loop_first_smp = first; mapped.loop_last_smp = end;
+        mapped.loop_mode = _keyboard[j].loop_type;
+      } else if (_keyboard[j].loop_type != LOOP_NONE) {
+        ESP_LOGW("LOOP", "Invalid interval: key=%d layer=%d; playing once", j, i);
+      }
       /*
       _sampleMap[j][i].attack_time    = _keyboard[j].attack_time;
       _sampleMap[j][i].decay_time     = _keyboard[j].decay_time;
@@ -671,7 +739,7 @@ void SamplerEngine::printMapping() {
   ESP_LOGI("",",");
   for (int i = 0; i < _veloLayers; i++) {
     for (int j = 0 ; j<128; j++ ) {
-      if (!_sampleMap[j][i].sectors.empty()) {
+      if (_sampleMap[j][i].source != INVALID_SAMPLE_SOURCE) {
         ESP_LOGI("","%d %3.2f\t",_sampleMap[j][i].native_freq, _sampleMap[j][i].speed );
       //  ESP_LOGI("","%s\t", _sampleMap[j][i].name.c_str() );
       } else {        
@@ -690,3 +758,4 @@ void SamplerEngine::printMapping() {
 
   
 }
+

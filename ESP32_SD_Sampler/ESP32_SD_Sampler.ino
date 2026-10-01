@@ -30,8 +30,11 @@
 #include "sdmmc.h"
 #include <vector>
 #include "sampler.h"
-#include "fx_reverb.h"
+#include "fx_rdx.h"
 #include <MIDI.h>
+#if SAMPLER_GUI
+#include "gui/gui_core.h"
+#endif
 
 
 #ifdef RGB_LED
@@ -75,11 +78,11 @@ MIDI_NAMESPACE::MidiInterface<MIDI_NAMESPACE::SerialMIDI<HardwareSerial, Serial2
 // =============================================================== MAIN oobjects ===============================================================
 SDMMC_FAT32     Card;
 SamplerEngine   Sampler;
-FxReverb        Reverb;
+RdxFxHost       Effects;
 
 // =============================================================== GLOBALS ===============================================================
-TaskHandle_t SynthTask;
-TaskHandle_t ControlTask;
+TaskHandle_t SynthTask = nullptr;
+TaskHandle_t ControlTask = nullptr;
 static volatile int DRAM_ATTR WORD_ALIGNED_ATTR out_buf_id = 0;
 static volatile int DRAM_ATTR WORD_ALIGNED_ATTR gen_buf_id = 1;
 static float DRAM_ATTR WORD_ALIGNED_ATTR sampler_l[DMA_BUF_LEN];     // sampler L buffer
@@ -90,18 +93,22 @@ static int16_t DRAM_ATTR WORD_ALIGNED_ATTR out_buf[DMA_BUF_LEN * 2];        // i
 
 
 // =============================================================== forward declarations ===============================================================
-static  void IRAM_ATTR mixer() ;
+static  void mixer() ;
 static  void IRAM_ATTR i2s_output();
 static  void IRAM_ATTR sampler_generate_buf();
 
 // =============================================================== PER CORE TASKS ===============================================================
 static void IRAM_ATTR audio_task(void *userData) { // core 0 task
+  // The stacks are allocated before loading a sampleset, while internal RAM is
+  // still contiguous. Do not touch the sampler until setup has finished.
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
   vTaskDelay(10);
   ESP_LOGI("","core 0 audio task run");
   vTaskDelay(20);
   volatile uint32_t WORD_ALIGNED_ATTR t1,t2,t3,t4;
   
   while (true) {
+    const uint32_t computeBegan = micros();
 #ifdef DEBUG_CORE_TIME 
     t1=micros();
 #endif
@@ -113,6 +120,16 @@ static void IRAM_ATTR audio_task(void *userData) { // core 0 task
 #endif
 
     mixer(); 
+    const uint32_t computeUs = micros() - computeBegan;
+    constexpr uint32_t blockBudgetUs = uint32_t(1000000ULL * DMA_BUF_LEN / SAMPLE_RATE);
+    // Act before the deadline is actually missed; conversion and I2S service
+    // still need part of the block period after synthesis and effects.
+    if (computeUs * 100 >= blockBudgetUs * 95) Sampler.noteCpuPressure();
+#if DEBUG_AUDIO_DIAGNOSTICS
+    audio_debug::audio.mark(audio_debug::COMPUTE_US, computeUs);
+    if (computeUs > blockBudgetUs)
+      audio_debug::audio.mark(audio_debug::SLOW_BLOCK, computeUs);
+#endif
     
 #ifdef DEBUG_CORE_TIME 
     t3=micros();
@@ -129,14 +146,27 @@ static void IRAM_ATTR audio_task(void *userData) { // core 0 task
 }
  
 static void  IRAM_ATTR control_task(void *userData) { // core 1 task
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
   byte hue=0;
   vTaskDelay(20);
   ESP_LOGI("","core 1 control task run");
   vTaskDelay(20);
   uint32_t WORD_ALIGNED_ATTR passby = 0;
 
-  while (true) { 
+  guiBegin(); // display, controls and state are owned exclusively by Core1
 
+  while (true) { 
+#if DEBUG_AUDIO_DIAGNOSTICS
+    static uint32_t previousPass = micros();
+    const uint32_t currentPass = micros(), gap = currentPass - previousPass;
+    previousPass = currentPass;
+    if (gap > 4000 && Sampler.getActiveVoices() > 0) {
+      audio_debug::control.mark(audio_debug::CONTROL_GAP_US, gap);
+      audio_debug::control.event(audio_debug::CONTROL_GAP_US, currentPass / 1000, 0, gap);
+    }
+#endif
+
+    Sampler.updateAdaptivePolyphony();
     Sampler.freeSomeVoices();
     
     Sampler.fillBuffer();
@@ -155,9 +185,20 @@ static void  IRAM_ATTR control_task(void *userData) { // core 1 task
     
     passby++;
 
+    guiPoll(); // inputs stay live; refill precedes throttled OLED tile transfers
+
     if (passby%256 == 0 ) { 
     
       processButtons();
+      #ifdef DEBUG_STREAM_STATS
+      static uint32_t lastStats = 0;
+      // Serial logging can block longer than a voice buffer lasts on S3.
+      // Keep cumulative counters, but print only during silence.
+      if (millis() - lastStats >= 5000 && Sampler.getActiveVoices() == 0) {
+        Sampler.printStreamStats(); lastStats = millis();
+        guiPrintStats();
+      }
+      #endif
       taskYIELD();
       
       #ifdef RGB_LED
@@ -187,7 +228,7 @@ void setup() {
   leds[0].setHue(HUE_RED); //green
   FastLED.show(1);
 #endif
-delay(2500);
+delay(800);
 
 ESP_LOGI("","MIDI: INIT");
   MidiInit();
@@ -209,13 +250,26 @@ delay(100);
 ESP_LOGI("","I2S: INIT");
   i2sInit();
 
-ESP_LOGI("","REVERB: INIT");
-  Reverb.Init();
- 
-  
-  Reverb.SetLevel(0.5f);
-  Reverb.SetTime(0.7f);
-  Sampler.setReverbSendLevel(0.5f);
+ESP_LOGI("","FX: INIT");
+  // Effects are optional: a PSRAM allocation failure leaves the sampler dry
+  // instead of consuming internal RAM needed by the stream buffers.
+  Effects.init();
+
+  // Sample metadata and WAV parsing fragment the small internal-RAM heap. A
+  // late 9 kB ControlTask allocation can then fail even when total free RAM is
+  // sufficient. Reserve both task stacks now and keep the tasks asleep until
+  // sampler setup is complete.
+  const BaseType_t controlCreated = xTaskCreatePinnedToCore(
+    control_task, "ControlTask", 9000, NULL, 5, &ControlTask, 1);
+  const BaseType_t audioCreated = xTaskCreatePinnedToCore(
+    audio_task, "SynthTask", 4000, NULL, 8, &SynthTask, 0);
+  if (controlCreated != pdPASS || audioCreated != pdPASS) {
+    ESP_LOGE("", "Task allocation failed: control=%ld audio=%ld free=%u largest=%u",
+      long(controlCreated), long(audioCreated),
+      unsigned(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+      unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
+    while (true) vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 
 
 //heap_caps_print_heap_info(MALLOC_CAP_8BIT || MALLOC_CAP_INTERNAL);
@@ -225,9 +279,9 @@ ESP_LOGI("","SAMPLER: INIT");
   Sampler.setCurrentFolder(1);
 
   initButtons();
-  
-  xTaskCreatePinnedToCore( audio_task, "SynthTask", 4000, NULL, 8, &SynthTask, 0 );
-  xTaskCreatePinnedToCore( control_task, "ControlTask", 9000, NULL, 5, &ControlTask, 1 );
+
+  xTaskNotifyGive(ControlTask);
+  xTaskNotifyGive(SynthTask);
  
   c_major();
 

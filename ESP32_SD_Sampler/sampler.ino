@@ -17,10 +17,17 @@ void SamplerEngine::init(SDMMC_FAT32* Card){
     ESP_LOGI("","Voice %d: ", i);
     // sustain is global and needed for every voice, so we just pass a pointer to it.
     if (!Voices[i].init(Card, &_sustain, &_normalized)) {
-      _maxVoices = i-1;
+      _maxVoices = i;
       break;
     }
     Voices[i].my_id = i;
+    _allocatedVoices = i + 1;
+  }
+  _maxVoices = _allocatedVoices;
+  _adaptivePolyphony.reset(_allocatedVoices, getUnderruns(), _cpuPressure.load(), millis());
+  if (!_allocatedVoices) {
+    ESP_LOGE("SAMPLER", "No audio buffers available");
+    while (true) delay(1000);
   }
   if (num_sets > 0) {
     setSampleRate(SAMPLE_RATE);
@@ -81,26 +88,28 @@ inline int SamplerEngine::assignVoice(byte midi_note, byte velo){
       id = i;
     }
   }
-  ESP_LOGI("","SAMPLER: No free slot: Steal a voice");
   return id;
 }
 
 inline void SamplerEngine::noteOn(uint8_t midiNote, uint8_t velo){
+  if (midiNote > 127) return;
+  if (!velo) { noteOff(midiNote); return; }
   int i = assignVoice(midiNote, velo);
-  sample_t smp = _sampleMap[midiNote][mapVelo(velo)];
+  const sample_t& smp = _sampleMap[midiNote][mapVelo(velo)];
   for (int n = 0; n < (( MAX_NOTES_PER_GROUP - 1 ) * MAX_GROUPS_CROSSES ); n++ ) {
     if (_groups[midiNote][n] == 255) break;    // terminate
     ESP_LOGI("","SAMPLER: GROUP KILL: %d", _groups[midiNote][n]);
     noteOff(_groups[midiNote][n], Adsr::END_SEMI_FAST);      // provide exclusivity
   }
-  if (smp.channels > 0) {
+  if (smp.source != INVALID_SAMPLE_SOURCE && smp.source < _sampleSources.size()) {
+    if (Voices[i].isActive()) ++_stealsImmediate;
    // ESP_LOGI("","SAMPLER: voice %d note %d velo %d", i, midiNote, velo);
-    Voices[i].setStarted(false);
+    Voices[i].end(Adsr::END_NOW);
     Voices[i].setAttackTime(_keyboard[midiNote].attack_time);
     Voices[i].setDecayTime(_keyboard[midiNote].decay_time);
     Voices[i].setReleaseTime(_keyboard[midiNote].release_time);
     Voices[i].setSustainLevel(_keyboard[midiNote].sustain_level);
-    Voices[i].start(_sampleMap[midiNote][mapVelo(velo)], midiNote, velo);
+    Voices[i].start(_sampleSources[smp.source], smp, midiNote, velo);
   } else {
     ESP_LOGI("","SAMPLER: no sample assigned");
     return;
@@ -108,6 +117,7 @@ inline void SamplerEngine::noteOn(uint8_t midiNote, uint8_t velo){
 }
 
 inline void SamplerEngine::noteOff(uint8_t midiNote, Adsr::eEnd_t end_type ){
+  if (midiNote > 127) return;
   if (_keyboard[midiNote].noteoff || end_type!= Adsr::END_REGULAR) {
     for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
       if (Voices[i].getMidiNote() == midiNote && Voices[i].isActive()) {      
@@ -125,7 +135,7 @@ inline void SamplerEngine::setSustain(bool onoff) {
   // ESP_LOGI("","SAMPLER: sustain: %d", onoff);
   if (!onoff) {
     for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
-      if (_keyboard[Voices[i].getMidiNote()].noteoff && Voices[i].isActive() ) {
+      if (Voices[i].isActive() && Voices[i].getMidiNote() < 128 && _keyboard[Voices[i].getMidiNote()].noteoff) {
         Voices[i].end(Adsr::END_REGULAR);   
       }
     }
@@ -206,14 +216,14 @@ void IRAM_ATTR SamplerEngine::fillBuffer() {
   int iToFeed;
   hunger = hungerMax = 0;
   iToFeed = 0;
-  for (int i=0; i<_maxVoices; i++) {
+  for (int i=0; i<_allocatedVoices; i++) {
     hunger = Voices[i].hunger();
     if (hunger > hungerMax) {
       hungerMax = hunger;
       iToFeed = i;
     }
   }
-  Voices[iToFeed].feed(); 
+  if (hungerMax) Voices[iToFeed].feed(); 
   // ESP_LOGI("","SAMPLER: Fed voice id=%d hunger=%d", iToFeed, hunger);
 }
 
@@ -237,6 +247,9 @@ inline void SamplerEngine::setCurrentFolder(int folder_id) {
     }
   }
   finalizeMapping();  // fill the gaps when we don't have dedicated samples for some pitches or velocity layers
+  ESP_LOGI("SAMPLER", "mapping: sources=%u cell=%u table=%u bytes",
+           unsigned(_sampleSources.size()), unsigned(sizeof(sample_t)),
+           unsigned(sizeof(_sampleMap)));
  // printMapping();
 }
 
@@ -255,6 +268,7 @@ inline void SamplerEngine::setPrevFolder() {
 
 void SamplerEngine::initKeyboard() {
   for (int i=0; i<128; ++i) {
+    _keyboard[i] = midikey_t{};
     _keyboard[i].freq         = (440.0f / 32.0f) * pow(2, ((float)(i - 9) / 12.0f));
     _keyboard[i].octave       = (i / 12) -1;
     _keyboard[i].name[0]      = notes[0][i%12];
@@ -268,33 +282,24 @@ void SamplerEngine::initKeyboard() {
 }
 
 void SamplerEngine::resetSamples() {
+  _title = "";
+  _maxVoices = _allocatedVoices;
+  _adaptivePolyphony.reset(_allocatedVoices, getUnderruns(), _cpuPressure.load(), millis());
+  _sustain = false;
   _amp = 1.0;
   _attackTime   = 0.0f;
   _decayTime    = 0.1f;
   _sustainLevel = 1.0f;
   _releaseTime  = 8.0f;
   for (int i = 0 ; i < MAX_POLYPHONY ; i++) {
-    Voices[i].end(Adsr::END_FAST);    
+    Voices[i].end(Adsr::END_NOW);    
   }
+  // Voices hold pointers into this vector; invalidate them only after every
+  // renderer has completed its END_NOW handshake.
+  _sampleSources.clear();
   for (int i = 0; i<MAX_VELOCITY_LAYERS; i++) {
     for (int j = 0; j<128; j++) {
-      _sampleMap[j][i].sectors.clear();
-      _sampleMap[j][i].byte_offset = 44;
-      _sampleMap[j][i].size = 0;      
-      _sampleMap[j][i].sample_rate   = 44100;
-      _sampleMap[j][i].channels   = 0;
-      _sampleMap[j][i].orig_freq = _keyboard[j].freq;
-      _sampleMap[j][i].orig_velo_layer = 0;
-      _sampleMap[j][i].amp = 1.0;
-      _sampleMap[j][i].speed = 0.0f;
-      _sampleMap[j][i].bit_depth = 0;
-      /*
-      _sampleMap[j][i].attack_time   = _attackTime;
-      _sampleMap[j][i].decay_time    = _decayTime;
-      _sampleMap[j][i].sustain_level = _sustainLevel;
-      _sampleMap[j][i].release_time  = _releaseTime;
-      */
-      _sampleMap[j][i].native_freq  = false;
+      _sampleMap[j][i] = sample_t{};
     }
   }
 }
@@ -312,7 +317,7 @@ void SamplerEngine::getSample(float& sampleL, float& sampleR){
   float sR = 0.0f;
   sampleL = 0.0f;
   sampleR = 0.0f;
-  for (int i = 0; i < _maxVoices; i++) {
+  for (int i = 0; i < _allocatedVoices; i++) {
     Voices[i].getSample(sL, sR);
     sampleL = sampleL + sL;
     sampleR = sampleR + sR;    
@@ -320,10 +325,10 @@ void SamplerEngine::getSample(float& sampleL, float& sampleR){
 }
 
 void SamplerEngine::freeSomeVoices() {
-  int id, n = 0;
+  int id = -1, n = 0;
   byte note_count[128]; // better be a private class var maybe
   int midi_note;
-  int desiredFree = SACRIFY_VOICES;
+  int desiredFree = min(SACRIFY_VOICES, int(_maxVoices) - 1);
   float score;
   float maxKillScore = 0.0f;
   float maxSameKillScore = 0.0f;
@@ -334,28 +339,35 @@ void SamplerEngine::freeSomeVoices() {
       midi_note = Voices[i].getMidiNote();
       note_count[midi_note]++;
       if (note_count[midi_note] > _keyboard[midi_note].limit_same) { // if we have limit overrun, find the best candidate
+        id = -1;
         for (int j = 0 ; j < MAX_POLYPHONY ; j++) {
-          if (Voices[j].getMidiNote() == midi_note) {
+          if (Voices[j].isActive() && !Voices[j].isDying() && Voices[j].getMidiNote() == midi_note) {
             score = Voices[j].getKillScore();
-            if (score > maxSameKillScore) {
+            if (id < 0 || score > maxSameKillScore) {
               maxSameKillScore = score;
               id = j;
             }
           }
         }
-        Voices[id].end(Adsr::END_FAST);
+        if (id >= 0) {
+          ++_stealsSameNote;
+          Voices[id].end(Adsr::END_FAST);
+        }
         //ESP_LOGI("","SAMPLER: KILL SAME NOTE id=%d", id);
         return;
       }
       score = Voices[i].getKillScore();
-      if (score > maxKillScore) {
+      if (id < 0 || score > maxKillScore) {
         maxKillScore = score;
         id = i;
       }
     }
   }
-  if ( ( n + SACRIFY_VOICES ) > MAX_POLYPHONY ) {
-    Voices[id].end(Adsr::END_FAST);
+  if ( ( n + desiredFree ) > _maxVoices ) {
+    if (id >= 0) {
+      ++_stealsPolyphony;
+      Voices[id].end(Adsr::END_FAST);
+    }
     //ESP_LOGI("","SAMPLER: KILL EXTRA VOICE id=%d", id);
     return;
   }
@@ -365,7 +377,54 @@ void SamplerEngine::freeSomeVoices() {
 inline void SamplerEngine::setPitch(int number) {
   float speedModifier = ((((float)number + 8191.5f) * (float)TWO_DIV_16383 ) - 1.0f ) * (float)_pitchBendSemitones;
   speedModifier = fast_semitones2speed(speedModifier);
-  for (int i=0; i<_maxVoices; i++) {
+  for (int i=0; i<_allocatedVoices; i++) {
     Voices[i].setPitch(speedModifier);
   }
+}
+
+void SamplerEngine::setMaxVoices(byte value) {
+  const uint8_t cap = constrain(value, 1, _allocatedVoices);
+  _adaptivePolyphony.reset(cap, getUnderruns(), _cpuPressure.load(), millis());
+  _maxVoices = cap;
+}
+
+void SamplerEngine::updateAdaptivePolyphony() {
+  if (_adaptivePolyphony.update(getUnderruns(), _cpuPressure.load(), millis()))
+    _maxVoices = _adaptivePolyphony.limit();
+}
+
+void SamplerEngine::allNotesOff(bool immediate) {
+  for (int i = 0; i < _allocatedVoices; ++i) {
+    Voices[i].setPressed(false);
+    Voices[i].end(immediate ? Adsr::END_NOW : Adsr::END_REGULAR);
+  }
+}
+
+void SamplerEngine::printStreamStats() {
+  uint32_t underruns = 0, slowest = 0;
+  for (int i = 0; i < _allocatedVoices; ++i) {
+    underruns += Voices[i].underruns();
+    slowest = max(slowest, Voices[i].maxFeedMicros());
+  }
+  ESP_LOGI("STREAM", "underruns=%lu max_refill_us=%lu", (unsigned long)underruns, (unsigned long)slowest);
+  ESP_LOGI("STREAM", "voices=%d limit=%u/%u allocated=%u cpu_pressure=%lu steal_limit=%lu steal_same=%lu steal_immediate=%lu",
+           getActiveVoices(), unsigned(_maxVoices), unsigned(_adaptivePolyphony.cap()), unsigned(_allocatedVoices),
+           (unsigned long)_cpuPressure.load(),
+           (unsigned long)_stealsPolyphony, (unsigned long)_stealsSameNote,
+           (unsigned long)_stealsImmediate);
+#if DEBUG_AUDIO_DIAGNOSTICS
+  printAudioDiagnostics();
+#endif
+}
+
+bool SamplerEngine::needsRefill() {
+  for (int i = 0; i < _allocatedVoices; ++i)
+    if (Voices[i].hunger()) return true;
+  return false;
+}
+
+uint32_t SamplerEngine::getUnderruns() const {
+  uint32_t count = 0;
+  for (int i = 0; i < _allocatedVoices; ++i) count += Voices[i].underruns();
+  return count;
 }
