@@ -37,12 +37,13 @@ The main difference, comparing to the projects available on the net, is that thi
   
 # YouTube Video
 
-[![Video](https://img.youtube.com/vi/6Oe6QPwk1ak/maxresdefault.jpg)](https://youtu.be/6Oe6QPwk1ak?feature=shared)
+[![Video](https://img.youtube.com/vi/6Oe6QPwk1ak/maxresdefault.jpg)](https://www.youtube.com/shorts/rSnbrV4N-98)
+
 
 # How To Build the Thing
-* You need ```Arduino IDE``` installed, preferrably, version 1.8.x. (Version 2.x.x will probably also work, but you may face some unexpected issues)
-* Next is ```ESP32 Arduino core```, version 2.0.17 seems to be the best choice (as for June 2024)
-* Libraries required are:    
+* You need ```Arduino IDE``` installed
+* Next is ```ESP32 Arduino core```
+* Libraries required are:
     * ```Fixed string library``` https://github.com/fatlab101/FixedString
     * ```Arduino MIDI library``` https://github.com/FortySevenEffects/arduino_midi_library
     * [optionally] If you want to use RGB LEDs, then also ```FastLED library``` is needed https://github.com/FastLED/FastLED
@@ -51,22 +52,12 @@ The main difference, comparing to the projects available on the net, is that thi
 * Open ```ESP32_SD_Sampler.ino``` file with Arduino IDE
 * Connect your board via USB to your computer, select the corresponding ```port``` in the ```Tools``` menu and press the ```Upload``` button in the Arduino IDE
 
-# Is it possible to run on ESP32 not S3?
-For the time being the sampler only supports S3 variant. 
-It's possible to rearrange classes in order to allocate members dynamically, and run it on an ESP32, but ESP32 has a strong limitation: memory segmentation (SRAM0, SRAM1, SRAM2 and segments within these parts like BSS, IRAM, DRAM etc) is hardware defined and has different performance. So it's quite a challenge to fit all the objects and buffers in appropriate memory regions. I have tried and managed to compile, but the performance was much worse so I rolled back. If someone would like to, please fork the repository and try.
+# Is it possible to run on a simple ESP32 not S3, not P4?
+Absolutely not possible
 
 
 # Polyphony
-The maximum number of simultaneously sounding voices mainly depends on the following four factors:
-* SD card tech specs
-* The size of the allocated per-voice buffers (fast internal RAM required, which is also used by main program and audio effects)
-* Required data rate (it depends on sample rates, number of channels and bit depths of both output bus and the sample files)
-* CPU and memory performance (in fact, the low-level memory caching routines seem to be the bottleneck for now)
-Each of the mentioned parameters has it's own limitations and even more, they are partly compete for the same resources. So the choosen configuration is always a compromise.
-
-With the microSD cards that I have, my current setting is 17 stereo voices. I now set 7 sectors per read, which gives approx. 5 MB/s reading speed. Combined limitation is per-voice buffer size (i.e. how many sectors we read from the SD per request). The more the size, the more the speed. But the more the size, the more memory we need. In theory, 5 MB/s at 44100 Hz 16 bit stereo should give 29 voices polyphony, so there is probably a room to improve to get more simultaneous voices. But the limitation can also be caused by the computing power and by the internal cache performance.
-
-PS. Of what I have tested, faster cards won't give you dramatical improvement in the matter of polyphony. I have tried a newer microSD which reads 8 sectors random blocks at apx. 7 MB/s, but only 20 voices I have managed to run at MAX.
+With a freshly formatted good microSD, all effects set to THRU, it's about 17 stereo voices on S3 and 25 on P4.   
 
 # Velocity layers
 There are currently 16 velocity layers (i.e. dynamic variants of each sampled note) which corresponds to the maximum count that I have found (https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html).
