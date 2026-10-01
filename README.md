@@ -1,3 +1,8 @@
+# New features introduced
+* **Looping**: Samples can have loop points set, and one of the three loop modes can be engaged: FORWARD, SUSTAIN and PINGPONG.
+* **Effects**: Audio effects are included, but not calibrated yet.
+* **GUI**: Simple menu to have access to the basic features: sample set selection, effects and volume.
+
 !Attention! ESP Arduino cores v.3.1.2 and 3.1.3 have some bug that won't allow i2s driver to install when PSRAM is enabled, please, avoid using these versions!
 
 # ESP32 SD Sampler
